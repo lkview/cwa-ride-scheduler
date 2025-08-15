@@ -4,6 +4,13 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabaseClient';
 
+/**
+ * Login page:
+ *  - Sends magic link via Supabase with redirect to PRODUCTION /auth/callback,
+ *    which then forwards back to THIS origin's /login (preview-safe) carrying the hash.
+ *  - If the URL already contains access_token/refresh_token in the hash, set the session
+ *    and leave /login.
+ */
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
@@ -11,16 +18,32 @@ export default function LoginPage() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // If already signed in (or the magic link just returned), leave /login
+  // If we arrive with a magic-link hash, finish sign-in here.
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) router.replace('/ride-events');
-    });
+    const hash = typeof window !== 'undefined' ? window.location.hash : '';
+    if (hash && hash.includes('access_token=') && hash.includes('refresh_token=')) {
+      const sp = new URLSearchParams(hash.slice(1));
+      const access_token = sp.get('access_token') || '';
+      const refresh_token = sp.get('refresh_token') || '';
+      if (access_token && refresh_token) {
+        supabase.auth.setSession({ access_token, refresh_token })
+          .then(({ error }) => {
+            if (error) setErr(error.message);
+            else router.replace('/ride-events');
+          })
+          .catch((e:any) => setErr(e?.message ?? 'Failed to set session'));
+      }
+    } else {
+      // Already signed in? Leave /login.
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session) router.replace('/ride-events');
+      });
+    }
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_IN') router.replace('/ride-events');
     });
     return () => {
-      // @ts-ignore – handles different supabase versions gracefully
+      // @ts-ignore
       sub?.subscription?.unsubscribe?.();
     };
   }, [router]);
@@ -29,15 +52,16 @@ export default function LoginPage() {
     e.preventDefault();
     setBusy(true); setErr(null); setMsg(null);
     try {
-      // Critical: send magic link back to this exact origin's /login (works for Preview & Prod)
-      const emailRedirectTo = `${window.location.origin}/login`;
+      const site = process.env.NEXT_PUBLIC_SITE_URL || 'https://cwa-ride-scheduler.vercel.app';
+      // Always redirect via PRODUCTION /auth/callback which forwards back to THIS origin's /login
+      const emailRedirectTo = `${site}/auth/callback?next=${encodeURIComponent(window.location.origin + '/login')}`;
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: { emailRedirectTo },
       });
       if (error) setErr(error.message);
       else setMsg('Check your email for a sign-in link.');
-    } catch (e: any) {
+    } catch (e:any) {
       setErr(e?.message ?? 'Unexpected error');
     } finally {
       setBusy(false);
