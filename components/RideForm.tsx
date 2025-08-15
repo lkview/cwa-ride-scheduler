@@ -8,8 +8,8 @@ type Option = { id: Id; label: string };
 
 export type RideEvent = {
   id?: Id;
-  date: string;            // YYYY-MM-DD
-  meeting_time: string;    // HH:MM
+  date: string;
+  meeting_time: string;
   pickup_location_id: Id;
   emergency_contact_id: Id;
   pilot_id: Id;
@@ -73,8 +73,11 @@ export default function RideForm({ initial, rideId }: Props) {
 
     const neqId = rideId ?? '00000000-0000-0000-0000-000000000000';
 
+    // Avoid deep generic instantiation from supabase types by casting to any for this small query builder.
+    const fromRideEvents = (supabase as any).from('ride_events');
+
     const q = (col: string, val: string) =>
-      supabase.from('ride_events')
+      fromRideEvents
         .select('id, date, meeting_time')
         .eq('date', date)
         .eq('meeting_time', mt)
@@ -91,7 +94,7 @@ export default function RideForm({ initial, rideId }: Props) {
       queries.push(q('passenger1_id', String(p2)));
     }
     // Also check passenger2 column for either p1 or p2
-    const q2 = (val: string) => supabase.from('ride_events')
+    const q2 = (val: string) => fromRideEvents
       .select('id, date, meeting_time')
       .eq('date', date)
       .eq('meeting_time', mt)
@@ -102,11 +105,11 @@ export default function RideForm({ initial, rideId }: Props) {
     if (p2) queries.push(q2(String(p2)));
 
     const results = await Promise.all(queries);
-    if (results.some(r => r.error)) {
-      const e = results.find(r => r.error)?.error?.message || 'Conflict check failed';
+    if (results.some((r: any) => r.error)) {
+      const e = results.find((r: any) => r.error)?.error?.message || 'Conflict check failed';
       problems.push(e);
     } else {
-      const [pilotC, p1C, p2C1, p1C2, p2C2] = results;
+      const [pilotC, p1C, p2C1, p1C2, p2C2] = results as any[];
       if (pilotC?.data?.length) problems.push('Pilot is already booked at that time.');
       if (p1C?.data?.length || p1C2?.data?.length) problems.push('Passenger 1 is already booked at that time.');
       if (p2 && (p2C1?.data?.length || p2C2?.data?.length)) problems.push('Passenger 2 is already booked at that time.');
@@ -134,11 +137,12 @@ export default function RideForm({ initial, rideId }: Props) {
     };
 
     let error;
+    const fromRideEvents = (supabase as any).from('ride_events');
     if (rideId) {
-      const { error: e } = await supabase.from('ride_events').update(payload).eq('id', rideId);
+      const { error: e } = await fromRideEvents.update(payload).eq('id', rideId);
       error = e || null;
     } else {
-      const { error: e } = await supabase.from('ride_events').insert(payload);
+      const { error: e } = await fromRideEvents.insert(payload);
       error = e || null;
     }
 
