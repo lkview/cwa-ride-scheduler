@@ -1,0 +1,33 @@
+'use client';
+import { useEffect, useState } from 'react';
+import { supabase } from '../lib/supabaseClient';
+
+type Props = { allow: Array<'admin'|'scheduler'>; children: React.ReactNode };
+
+export default function RoleGate({ allow, children }: Props) {
+  const [role, setRole] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const { data: session } = await supabase.auth.getSession();
+      if (!session.session) { setRole(null); setLoading(false); return; }
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('user_id', session.session.user.id)
+        .maybeSingle();
+      if (error) setErr(error.message);
+      setRole(data?.role ?? null);
+      setLoading(false);
+    })();
+  }, []);
+
+  if (loading) return <div className="p-4">Loading…</div>;
+  if (err) return <div className="p-4 text-red-600">{err}</div>;
+  if (!role || !allow.includes(role as any)) {
+    return <div className="p-4 text-red-600">You don’t have permission to access this page.</div>;
+  }
+  return <>{children}</>;
+}

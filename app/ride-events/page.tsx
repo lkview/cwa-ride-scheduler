@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import AuthGate from '../../components/AuthGate';
+import Link from 'next/link';
 
 type Ride = {
   id: string;
@@ -15,13 +16,20 @@ type Ride = {
   pickup_location_id: string;
   emergency_contact_id: string;
 };
-
 type Dict = Record<string, string>;
+
+async function fetchMyRole() {
+  const { data: session } = await supabase.auth.getSession();
+  if (!session.session) return null;
+  const { data } = await supabase.from('profiles').select('role').eq('user_id', session.session.user.id).maybeSingle();
+  return data?.role ?? null;
+}
 
 export default function RideEventsPage() {
   const [rows, setRows] = useState<Ride[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [role, setRole] = useState<string | null>(null);
 
   const [pilotMap, setPilotMap] = useState<Dict>({});
   const [passengerMap, setPassengerMap] = useState<Dict>({});
@@ -37,6 +45,9 @@ export default function RideEventsPage() {
         supabase.from('pickup_locations').select('id, name'),
         supabase.from('emergency_contacts').select('id, name'),
       ]);
+
+      const r = await fetchMyRole();
+      setRole(r);
 
       if (rides.error) { setErr(rides.error.message); setLoading(false); return; }
       setRows(rides.data || []);
@@ -63,7 +74,12 @@ export default function RideEventsPage() {
 
   return (
     <AuthGate>
-      <h1 className="text-xl font-semibold mb-3">Ride Events</h1>
+      <div className="flex items-center gap-3 mb-3">
+        <h1 className="text-xl font-semibold flex-1">Ride Events</h1>
+        {(role === 'admin' || role === 'scheduler') && (
+          <Link href="/ride-events/new" className="px-3 py-2 rounded bg-black text-white">New Ride</Link>
+        )}
+      </div>
       {loading && <div>Loading…</div>}
       {err && <div className="text-red-600">{err}</div>}
       {!loading && !err && (
@@ -78,6 +94,7 @@ export default function RideEventsPage() {
                 <th className="px-3 py-2">Emergency Contact</th>
                 <th className="px-3 py-2">Status</th>
                 <th className="px-3 py-2">Locked</th>
+                {(role === 'admin' || role === 'scheduler') && <th className="px-3 py-2">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -93,6 +110,13 @@ export default function RideEventsPage() {
                   <td className="px-3 py-2">{ecMap[r.emergency_contact_id] ?? '—'}</td>
                   <td className="px-3 py-2">{r.status}</td>
                   <td className="px-3 py-2">{r.locked ? 'Yes' : 'No'}</td>
+                  {(role === 'admin' || role === 'scheduler') && (
+                    <td className="px-3 py-2">
+                      {!r.locked ? (
+                        <Link href={`/ride-events/edit/${r.id}`} className="underline">Edit</Link>
+                      ) : '—'}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
