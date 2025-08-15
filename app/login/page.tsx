@@ -12,10 +12,20 @@ export default function LoginPage() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true); setErr(null); setMsg(null);
-    const { error } = await supabase.auth.signInWithOtp({ email });
-    if (error) setErr(error.message);
-    else setMsg('Check your email for a sign-in link.');
-    setBusy(false);
+    try {
+      // Ensure magic link redirects back to the same origin (preview or production)
+      const emailRedirectTo = `${window.location.origin}/`;
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo }
+      });
+      if (error) setErr(error.message);
+      else setMsg('Check your email for a sign-in link.');
+    } catch (e:any) {
+      setErr(e?.message ?? 'Unexpected error');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
