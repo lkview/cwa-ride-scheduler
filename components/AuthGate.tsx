@@ -1,26 +1,33 @@
 'use client';
-
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import Link from 'next/link';
+import DevAuth, { getDevRole } from './DevAuth';
+
+const DEV = process.env.NEXT_PUBLIC_DEV_FAKE_AUTH === 'true';
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<'loading' | 'authed' | 'anon'>('loading');
+  if (DEV) {
+    // In dev fake-auth, always render + show the banner
+    return <><DevAuth />{children}</>;
+  }
+
+  const [ok, setOk] = useState<boolean>(false);
+  const [busy, setBusy] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setState(data.session ? 'authed' : 'anon');
-    });
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setOk(!!session);
+      setBusy(false);
+    })();
   }, []);
 
-  if (state === 'loading') return <div className="p-6">Loading…</div>;
-  if (state === 'anon') {
-    return (
-      <div className="p-6 space-y-2">
-        <p>You must be signed in to view this page.</p>
-        <Link className="underline" href="/login">Go to login</Link>
-      </div>
-    );
-  }
+  if (busy) return <div className="p-4">Loading…</div>;
+  if (!ok) return (
+    <div className="p-4">
+      <p className="mb-3">You need to sign in.</p>
+      <a className="underline" href="/login">Go to Login</a>
+    </div>
+  );
   return <>{children}</>;
 }

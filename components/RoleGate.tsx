@@ -1,10 +1,26 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import DevAuth, { getDevRole } from './DevAuth';
+
+type Role = 'admin'|'scheduler'|'pilot'|'viewer';
+const DEV = process.env.NEXT_PUBLIC_DEV_FAKE_AUTH === 'true';
 
 type Props = { allow: Array<'admin'|'scheduler'>; children: React.ReactNode };
 
 export default function RoleGate({ allow, children }: Props) {
+  if (DEV) {
+    const role = getDevRole() as Role;
+    return (
+      <>
+        <DevAuth />
+        {allow.includes(role as any)
+          ? <>{children}</>
+          : <div className="p-4 text-red-600">You don’t have permission to access this page (role: {role}).</div>}
+      </>
+    );
+  }
+
   const [role, setRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);

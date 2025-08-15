@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../lib/supabaseClient';
 
+const DEV = process.env.NEXT_PUBLIC_DEV_FAKE_AUTH === 'true';
+
 type Id = string;
 type Option = { id: Id; label: string };
 
@@ -24,6 +26,12 @@ type Props = {
   initial?: Partial<RideEvent>;
   rideId?: Id | null;
 };
+
+async function getJSON<T>(url: string): Promise<T> {
+  const r = await fetch(url, { cache: 'no-store' });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
 
 export default function RideForm({ initial, rideId }: Props) {
   const router = useRouter();
@@ -49,16 +57,29 @@ export default function RideForm({ initial, rideId }: Props) {
   // Load options
   useEffect(() => {
     (async () => {
-      const [pilots, passengers, pickups, ecs] = await Promise.all([
-        supabase.from('pilots').select('id, first_name, last_name').order('last_name'),
-        supabase.from('passengers').select('id, first_name, last_name').order('last_name'),
-        supabase.from('pickup_locations').select('id, name').order('name'),
-        supabase.from('emergency_contacts').select('id, name').order('name'),
-      ]);
-      if (!pilots.error) setPilotOpts((pilots.data||[]).map(p=>({id:p.id,label:`${p.last_name}, ${p.first_name}`})));
-      if (!passengers.error) setPassengerOpts((passengers.data||[]).map(p=>({id:p.id,label:`${p.last_name}, ${p.first_name}`})));
-      if (!pickups.error) setPickupOpts((pickups.data||[]).map(p=>({id:p.id,label:p.name})));
-      if (!ecs.error) setEcOpts((ecs.data||[]).map(p=>({id:p.id,label:p.name})));
+      if (DEV) {
+        const [pilots, passengers, pickups, ecs] = await Promise.all([
+          getJSON<{data:any[]}>('/api/dev/list/pilots'),
+          getJSON<{data:any[]}>('/api/dev/list/passengers'),
+          getJSON<{data:any[]}>('/api/dev/list/pickup_locations'),
+          getJSON<{data:any[]}>('/api/dev/list/emergency_contacts'),
+        ]);
+        setPilotOpts((pilots.data||[]).map(p=>({id:p.id,label:`${p.last_name}, ${p.first_name}`})));
+        setPassengerOpts((passengers.data||[]).map(p=>({id:p.id,label:`${p.last_name}, ${p.first_name}`})));
+        setPickupOpts((pickups.data||[]).map(p=>({id:p.id,label:p.name})));
+        setEcOpts((ecs.data||[]).map(p=>({id:p.id,label:p.name})));
+      } else {
+        const [pilots, passengers, pickups, ecs] = await Promise.all([
+          supabase.from('pilots').select('id, first_name, last_name').order('last_name'),
+          supabase.from('passengers').select('id, first_name, last_name').order('last_name'),
+          supabase.from('pickup_locations').select('id, name').order('name'),
+          supabase.from('emergency_contacts').select('id, name').order('name'),
+        ]);
+        if (!pilots.error) setPilotOpts((pilots.data||[]).map(p=>({id:p.id,label:`${p.last_name}, ${p.first_name}`})));
+        if (!passengers.error) setPassengerOpts((passengers.data||[]).map(p=>({id:p.id,label:`${p.last_name}, ${p.first_name}`})));
+        if (!pickups.error) setPickupOpts((pickups.data||[]).map(p=>({id:p.id,label:p.name})));
+        if (!ecs.error) setEcOpts((ecs.data||[]).map(p=>({id:p.id,label:p.name})));
+      }
     })();
   }, []);
 
@@ -68,14 +89,23 @@ export default function RideForm({ initial, rideId }: Props) {
 
   const checkConflicts = async () => {
     if (!valid) return ['Please complete all required fields.'];
+    if (DEV) {
+      const q = new URLSearchParams({
+        date, time, pilot: String(pilot), p1: String(p1),
+      });
+      if (p2) q.set('p2', String(p2));
+      if (rideId) q.set('exclude', rideId);
+      const r = await getJSON<{ok:boolean; errors:string[] }>(`/api/dev/conflicts?${q.toString()}`);
+      const msgs: string[] = [];
+      if (!r.ok) msgs.push('A pilot or passenger is already booked at that time.');
+      if (r.errors?.length) msgs.push(...r.errors);
+      return msgs;
+    }
+
     const problems: string[] = [];
     const mt = time.length === 5 ? time + ':00' : time;
-
     const neqId = rideId ?? '00000000-0000-0000-0000-000000000000';
-
-    // Avoid deep generic instantiation from supabase types by casting to any for this small query builder.
     const fromRideEvents = (supabase as any).from('ride_events');
-
     const q = (col: string, val: string) =>
       fromRideEvents
         .select('id, date, meeting_time')
@@ -84,16 +114,11 @@ export default function RideForm({ initial, rideId }: Props) {
         .eq(col as any, val)
         .neq('id', neqId)
         .limit(1);
-
     const queries: any[] = [
       q('pilot_id', String(pilot)),
       q('passenger1_id', String(p1)),
     ];
-
-    if (p2) {
-      queries.push(q('passenger1_id', String(p2)));
-    }
-    // Also check passenger2 column for either p1 or p2
+    if (p2) queries.push(q('passenger1_id', String(p2)));
     const q2 = (val: string) => fromRideEvents
       .select('id, date, meeting_time')
       .eq('date', date)
@@ -103,7 +128,6 @@ export default function RideForm({ initial, rideId }: Props) {
       .limit(1);
     queries.push(q2(String(p1)));
     if (p2) queries.push(q2(String(p2)));
-
     const results = await Promise.all(queries);
     if (results.some((r: any) => r.error)) {
       const e = results.find((r: any) => r.error)?.error?.message || 'Conflict check failed';
@@ -136,23 +160,31 @@ export default function RideForm({ initial, rideId }: Props) {
       status,
     };
 
-    let error;
-    const fromRideEvents = (supabase as any).from('ride_events');
-    if (rideId) {
-      const { error: e } = await fromRideEvents.update(payload).eq('id', rideId);
-      error = e || null;
+    let error: any = null;
+    if (DEV) {
+      const url = rideId ? `/api/dev/ride-events/${rideId}` : '/api/dev/ride-events';
+      const method = rideId ? 'PATCH' : 'POST';
+      const r = await fetch(url, { method, body: JSON.stringify(payload), headers: { 'Content-Type':'application/json' }});
+      if (!r.ok) error = await r.text();
     } else {
-      const { error: e } = await fromRideEvents.insert(payload);
-      error = e || null;
+      const fromRideEvents = (supabase as any).from('ride_events');
+      if (rideId) {
+        const { error: e1 } = await fromRideEvents.update(payload).eq('id', rideId);
+        error = e1 || null;
+      } else {
+        const { error: e2 } = await fromRideEvents.insert(payload);
+        error = e2 || null;
+      }
     }
 
     setBusy(false);
-    if (error) { setErr(error.message); return; }
+    if (error) { setErr(typeof error==='string' ? error : error.message); return; }
     router.push('/ride-events');
   };
 
   return (
     <form onSubmit={submit} className="space-y-4 max-w-2xl">
+      {DEV && <div className="p-2 bg-yellow-50 border border-yellow-200 text-yellow-800 rounded text-sm">DEV MODE: using service API, auth bypassed.</div>}
       {conflicts.length > 0 && (
         <div className="p-3 border border-red-300 bg-red-50 text-red-700 rounded">
           <div className="font-semibold mb-1">Please fix these before saving:</div>
