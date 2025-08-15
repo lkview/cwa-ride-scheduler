@@ -1,27 +1,43 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabaseClient';
 
 export default function LoginPage() {
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // If already signed in (or the magic link just returned), leave /login
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) router.replace('/ride-events');
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN') router.replace('/ride-events');
+    });
+    return () => {
+      // @ts-ignore – handles different supabase versions gracefully
+      sub?.subscription?.unsubscribe?.();
+    };
+  }, [router]);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true); setErr(null); setMsg(null);
     try {
-      // Ensure magic link redirects back to the same origin (preview or production)
-      const emailRedirectTo = `${window.location.origin}/`;
+      // Critical: send magic link back to this exact origin's /login (works for Preview & Prod)
+      const emailRedirectTo = `${window.location.origin}/login`;
       const { error } = await supabase.auth.signInWithOtp({
         email,
-        options: { emailRedirectTo }
+        options: { emailRedirectTo },
       });
       if (error) setErr(error.message);
       else setMsg('Check your email for a sign-in link.');
-    } catch (e:any) {
+    } catch (e: any) {
       setErr(e?.message ?? 'Unexpected error');
     } finally {
       setBusy(false);
