@@ -14,13 +14,21 @@ export async function GET(req: Request) {
 
   const neq = exclude ? { column: 'id', value: exclude } : null;
 
-  const checks: Array<Promise<any>> = [];
+  // Avoid deep generic instantiation by casting the query builder to any.
+  const fromRideEvents: any = (admin as any).from('ride_events');
+
   const q = (col: string, val: string) => {
-    let query = admin.from('ride_events').select('id').eq('date', date).eq('meeting_time', mt).eq(col, val).limit(1);
+    let query: any = fromRideEvents
+      .select('id')
+      .eq('date', date)
+      .eq('meeting_time', mt)
+      .eq(col as any, val)
+      .limit(1);
     if (neq) query = query.neq(neq.column as any, neq.value as any);
     return query;
   };
 
+  const checks: Array<Promise<any>> = [];
   if (pilot) checks.push(q('pilot_id', pilot));
   if (p1) checks.push(q('passenger1_id', p1));
   if (p2) checks.push(q('passenger1_id', p2));
@@ -28,7 +36,7 @@ export async function GET(req: Request) {
   if (p2) checks.push(q('passenger2_id', p2));
 
   const results = await Promise.all(checks);
-  const any = results.some(r => r.error || (r.data && r.data.length));
-  const errors = results.filter(r=>r.error).map(r=>r.error.message);
+  const any = results.some((r: any) => r.error || (r.data && r.data.length));
+  const errors = results.filter((r: any) => r.error).map((r: any) => r.error.message);
   return NextResponse.json({ ok: !any, errors });
 }
