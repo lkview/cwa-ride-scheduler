@@ -1,13 +1,17 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import DevAuth, { getDevRole } from './DevAuth';
+import DevAuth from './DevAuth';
 
-const DEV = process.env.NEXT_PUBLIC_DEV_FAKE_AUTH === 'true';
+function isPreviewHost() {
+  if (typeof window === 'undefined') return false;
+  const h = window.location.hostname;
+  return (/\.vercel\.app$/.test(h) && h !== 'cwa-ride-scheduler.vercel.app') || /-git-/.test(h);
+}
+const DEV = process.env.NEXT_PUBLIC_DEV_FAKE_AUTH === 'true' || isPreviewHost();
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
   if (DEV) {
-    // In dev fake-auth, always render + show the banner
     return <><DevAuth />{children}</>;
   }
 

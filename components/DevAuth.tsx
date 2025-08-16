@@ -1,7 +1,16 @@
 'use client';
 import { useEffect, useState } from 'react';
 
-const DEV = process.env.NEXT_PUBLIC_DEV_FAKE_AUTH === 'true';
+function isPreviewHost() {
+  if (typeof window === 'undefined') return false;
+  const h = window.location.hostname;
+  // Enable on any vercel.app host that isn't the production domain, or ones with -git- in the subdomain
+  return (/\.vercel\.app$/.test(h) && h !== 'cwa-ride-scheduler.vercel.app') || /-git-/.test(h);
+}
+
+const DEV_FLAG = process.env.NEXT_PUBLIC_DEV_FAKE_AUTH === 'true';
+const DEV = DEV_FLAG || isPreviewHost();
+
 type Role = 'admin'|'scheduler'|'pilot'|'viewer';
 
 export function getDevRole(): Role {
@@ -22,7 +31,6 @@ export default function DevAuth() {
   const change = (r: Role) => {
     setRole(r);
     if (typeof window!=='undefined') localStorage.setItem('devRole', r);
-    // small flash ok
     if (typeof window!=='undefined') window.location.reload();
   };
 
@@ -40,7 +48,7 @@ export default function DevAuth() {
       <Btn r="scheduler" />
       <Btn r="pilot" />
       <Btn r="viewer" />
-      <span className="ml-3 text-xs text-yellow-700">(bypasses Supabase login; uses server API)</span>
+      <span className="ml-3 text-xs text-yellow-700">(auto on Preview; bypasses Supabase login)</span>
     </div>
   );
 }
