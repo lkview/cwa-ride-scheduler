@@ -11,7 +11,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'name and address are required.' }, { status: 400 });
     }
 
-    const supabase = createServerUserClient();
+    const supabase = await createServerUserClient();
     const { data, error } = await supabase
       .from('pickup_locations')
       .insert([{ name, address, notes, lat, lng }])

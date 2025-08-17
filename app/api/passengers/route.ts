@@ -11,7 +11,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'first_name, last_name, and (phone OR email) are required.' }, { status: 400 });
     }
 
-    const supabase = createServerUserClient();
+    const supabase = await createServerUserClient();
     const { data, error } = await supabase
       .from('passengers')
       .insert([{ first_name, last_name, phone, email, address, notes }])
