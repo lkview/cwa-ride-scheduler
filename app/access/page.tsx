@@ -2,13 +2,19 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
 
 type Who = {
+  env: string;
+  schema: string;
+  devFakeAuth: boolean;
   email: string | null;
   user_id: string | null;
   role: string | null;
   pilot_id: string | null;
-  schema: string;
+  hasAccess: boolean;
+  hasRefresh: boolean;
+  userErr?: string | null;
 };
 
 export default function AccessPage() {
@@ -18,7 +24,11 @@ export default function AccessPage() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch('/api/whoami', { cache: 'no-store' });
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch('/api/whoami', {
+          cache: 'no-store',
+          headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},
+        });
         setWho(await res.json());
       } catch (e: any) {
         setErr(e?.message ?? 'Failed to load');
@@ -34,8 +44,8 @@ export default function AccessPage() {
         {JSON.stringify(who, null, 2)}
       </pre>
       <p className="mt-4 text-sm text-gray-600">
-        If <b>role</b> is <code>viewer</code> here, sign out, then go to <code>/login</code> on this same
-        preview and log in as your <b>DEV</b> admin/scheduler email. Open the magic link, then refresh this page.
+        If <b>role</b> is <code>viewer</code> here but you're logged in as admin/scheduler/pilot,
+        try signing out and back in. In Preview, you can also use the dev bar to log in as a test user.
       </p>
     </main>
   );
