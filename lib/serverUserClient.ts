@@ -1,22 +1,22 @@
-
-import { cookies } from 'next/headers';
+// lib/serverUserClient.ts
+// Server-side Supabase client that forwards the user's access token.
 import { createClient } from '@supabase/supabase-js';
 
-// Next.js 15: cookies() is async. Await it, then read sb-access-token.
-export async function createServerUserClient() {
+export async function createServerUserClient(req?: Request) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
   const schema = process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || 'public';
 
-  let access: string | undefined = undefined;
+  // Prefer Authorization header (sent from browser)
+  let accessToken: string | undefined;
   try {
-    const store = await cookies();
-    access = store.get('sb-access-token')?.value;
+    const authHeader = req?.headers?.get('authorization') || req?.headers?.get('Authorization');
+    if (authHeader) accessToken = authHeader.replace(/^Bearer\s+/i, '');
   } catch {}
 
   return createClient(url, anon, {
     db: { schema },
-    global: { headers: access ? { Authorization: `Bearer ${access}` } : {} },
+    global: accessToken ? { headers: { Authorization: `Bearer ${accessToken}` } } : undefined,
     auth: { persistSession: false, detectSessionInUrl: false },
   });
 }

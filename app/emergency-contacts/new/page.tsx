@@ -1,41 +1,59 @@
-
+// app/emergency-contacts/new/page.tsx
 'use client';
+
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabaseClient';
 
 export default function NewEmergencyContactPage() {
   const r = useRouter();
-  const [form, setForm] = useState({ name:'', phone:'', email:'', notes:'' });
-  const [err, setErr] = useState<string|null>(null);
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setErr(null); setBusy(true);
+    setErr(null);
+    setBusy(true);
     try {
-      const res = await fetch('/api/emergency-contacts', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(form) });
+      // Get the user's session token and forward it to the API route
+      const { data: { session } } = await supabase.auth.getSession();
+
+      const res = await fetch('/api/emergency-contacts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify({ name, phone, email, notes }),
+      });
+
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Failed to create');
+      if (!res.ok) throw new Error(json?.error || 'Failed to create contact');
       r.push('/emergency-contacts');
-    } catch (e:any) { setErr(e.message); } finally { setBusy(false); }
+    } catch (e: any) {
+      setErr(e.message || 'Unexpected error');
+    } finally {
+      setBusy(false);
+    }
   }
-  function f<K extends keyof typeof form>(k:K){return(e:any)=>setForm(s=>({...s,[k]:e.target.value}));}
 
   return (
-    <div className="max-w-xl mx-auto p-6">
-      <h1 className="text-xl font-semibold mb-4">New Emergency Contact</h1>
-      <form onSubmit={onSubmit} className="space-y-3">
-        <div className="grid grid-cols-2 gap-3">
-          <input className="border rounded px-3 py-2" placeholder="Name" value={form.name} onChange={f('name')} required />
-          <input className="border rounded px-3 py-2" placeholder="Phone" value={form.phone} onChange={f('phone')} required />
+    <div className="p-6 max-w-3xl mx-auto">
+      <h1 className="text-2xl font-semibold mb-6">New Emergency Contact</h1>
+      <form onSubmit={onSubmit} className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <input className="border p-3 rounded" placeholder="Name" value={name} onChange={e => setName(e.target.value)} required />
+          <input className="border p-3 rounded" placeholder="Phone" value={phone} onChange={e => setPhone(e.target.value)} required />
         </div>
-        <input className="border rounded px-3 py-2 w-full" type="email" placeholder="Email (optional)" value={form.email} onChange={f('email')} />
-        <textarea className="border rounded px-3 py-2 w-full" placeholder="Notes (optional)" value={form.notes} onChange={f('notes')} />
-        <button disabled={busy} className="px-3 py-2 rounded bg-black text-white disabled:opacity-60">
-          {busy ? 'Saving…' : 'Create Contact'}
-        </button>
+        <input className="border p-3 rounded w-full" placeholder="Email (optional)" value={email} onChange={e => setEmail(e.target.value)} />
+        <textarea className="border p-3 rounded w-full" placeholder="Notes (optional)" value={notes} onChange={e => setNotes(e.target.value)} />
+        <button disabled={busy} className="border px-4 py-2 rounded">{busy ? 'Creating…' : 'Create Contact'}</button>
+        {err && <p className="text-red-600 mt-2">{err}</p>}
       </form>
-      {err && <div className="mt-3 text-red-600">{err}</div>}
     </div>
   );
 }
