@@ -21,18 +21,18 @@ async function loadContact(id: string) {
   return data;
 }
 
-export default async function EditPage({
-  params,
-  searchParams,
-}: {
-  params: { id: string };
-  searchParams?: Record<string, string | string[] | undefined>;
+export default async function EditPage(props: {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const row = await loadContact(params.id).catch(() => null);
+  // Next 15: params/searchParams are Promises
+  const { id } = await props.params;
+  const sp = (props.searchParams ? await props.searchParams : {}) ?? {};
+
+  const row = await loadContact(id).catch(() => null);
   if (!row) notFound();
 
-  const err =
-    typeof searchParams?.error === 'string' ? decodeURIComponent(searchParams.error) : null;
+  const err = typeof sp.error === 'string' ? decodeURIComponent(sp.error) : null;
 
   async function updateContact(formData: FormData) {
     'use server';
@@ -45,14 +45,14 @@ export default async function EditPage({
     try {
       if (!id || !name || !raw) throw new Error('Name and phone are required.');
       // Validate + normalize (throws on invalid)
-      const phone = formatUSPhone(raw);
+      const phone = formatUSPhone(raw); // "(XXX) XXX-XXXX"
 
       const supabase = createClient(SUPABASE_URL, SERVICE_KEY, { db: { schema: SCHEMA } });
       const { error } = await supabase
         .from('emergency_contacts')
         .update({
           name,
-          phone, // "(XXX) XXX-XXXX"
+          phone,
           email: email || null,
           notes: notes || null,
         })
@@ -76,10 +76,7 @@ export default async function EditPage({
       <h1>Edit Emergency Contact</h1>
 
       {err && (
-        <div
-          role="alert"
-          className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800"
-        >
+        <div role="alert" className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
           {err}
         </div>
       )}
@@ -130,10 +127,7 @@ export default async function EditPage({
           />
         </div>
 
-        <button
-          type="submit"
-          className="rounded bg-black px-4 py-2 text-white hover:opacity-90"
-        >
+        <button type="submit" className="rounded bg-black px-4 py-2 text-white hover:opacity-90">
           Save Changes
         </button>
       </form>
