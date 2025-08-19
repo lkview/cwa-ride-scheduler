@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 type Contact = {
   id: string;
   name: string | null;
-  phone: string | null;
+  phone: string | null;  // nullable in DB
   email: string | null;
   notes: string | null;
   hidden?: boolean | null;
@@ -52,7 +52,9 @@ export default async function EmergencyContactsPage() {
           {rows.map((r) => (
             <tr key={r.id}>
               <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{r.name}</td>
-              <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{formatUSPhoneDisplay(r.phone)}</td>
+              <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
+                {formatUSPhoneDisplay(r.phone ?? '')}
+              </td>
               <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{r.email}</td>
               <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{r.notes}</td>
               <td style={{ padding: '8px', borderBottom: '1px solid #eee', textAlign: 'right' }}>
