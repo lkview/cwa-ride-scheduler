@@ -2,20 +2,13 @@
 import { notFound, redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@supabase/supabase-js';
-import type { Metadata } from 'next';
-import { formatUSPhone } from '@/lib/phone'; // uses the validator/formatter we added
+import { formatUSPhone } from '@/lib/phone';
 
-export const metadata: Metadata = { title: 'Edit Emergency Contact' };
 export const dynamic = 'force-dynamic';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SERVICE_KEY   = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const SCHEMA        = process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || 'public';
-
-type PageProps = {
-  params: { id: string };
-  searchParams?: Record<string, string | string[] | undefined>;
-};
+const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const SCHEMA       = process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || 'public';
 
 async function loadContact(id: string) {
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY, { db: { schema: SCHEMA } });
@@ -28,7 +21,13 @@ async function loadContact(id: string) {
   return data;
 }
 
-export default async function EditPage({ params, searchParams }: PageProps) {
+export default async function EditPage({
+  params,
+  searchParams,
+}: {
+  params: { id: string };
+  searchParams?: Record<string, string | string[] | undefined>;
+}) {
   const row = await loadContact(params.id).catch(() => null);
   if (!row) notFound();
 
@@ -37,25 +36,23 @@ export default async function EditPage({ params, searchParams }: PageProps) {
 
   async function updateContact(formData: FormData) {
     'use server';
-    const id = String(formData.get('id') ?? '');
-    const name = String(formData.get('name') ?? '').trim();
-    const phoneRaw = String(formData.get('phone') ?? '').trim();
+    const id    = String(formData.get('id') ?? '');
+    const name  = String(formData.get('name') ?? '').trim();
+    const raw   = String(formData.get('phone') ?? '').trim();
     const email = String(formData.get('email') ?? '').trim();
     const notes = String(formData.get('notes') ?? '').trim();
 
     try {
-      if (!id || !name || !phoneRaw) {
-        throw new Error('Name and phone are required.');
-      }
-      // validate + normalize phone (will throw on bad input)
-      const phone = formatUSPhone(phoneRaw);
+      if (!id || !name || !raw) throw new Error('Name and phone are required.');
+      // Validate + normalize (throws on invalid)
+      const phone = formatUSPhone(raw);
 
       const supabase = createClient(SUPABASE_URL, SERVICE_KEY, { db: { schema: SCHEMA } });
       const { error } = await supabase
         .from('emergency_contacts')
         .update({
           name,
-          phone,                // normalized "(XXX) XXX-XXXX"
+          phone, // "(XXX) XXX-XXXX"
           email: email || null,
           notes: notes || null,
         })
@@ -68,9 +65,8 @@ export default async function EditPage({ params, searchParams }: PageProps) {
     } catch (e: any) {
       const msg =
         e?.message === 'Invalid US phone number'
-          ? 'Please enter a 10-digit US phone number (no letters).'
+          ? 'Please enter a valid 10-digit US phone number.'
           : e?.message || 'Update failed.';
-      // bounce back to the form with a terse, user-visible error
       redirect(`/emergency-contacts/${encodeURIComponent(id)}/edit?error=${encodeURIComponent(msg)}`);
     }
   }
@@ -107,13 +103,11 @@ export default async function EditPage({ params, searchParams }: PageProps) {
             name="phone"
             defaultValue={row.phone ?? ''}
             placeholder="e.g. 509-555-1214"
-            required
             inputMode="numeric"
+            required
             className="mt-1 w-full rounded border px-3 py-2"
           />
-          <p className="mt-1 text-xs text-gray-500">
-            10 digits required. We’ll format it for you.
-          </p>
+          <p className="mt-1 text-xs text-gray-500">10 digits required. We’ll format it.</p>
         </div>
 
         <div>
