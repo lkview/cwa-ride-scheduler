@@ -1,31 +1,36 @@
 // lib/serverPageClient.ts
-import { createServerClient } from '@supabase/ssr';
+import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 
 /**
- * Supabase client for Server Components (pages in /app).
- * We only need to READ cookies here, so set/remove can be no-ops.
+ * Server-side Supabase client for App Router pages (Server Components).
+ * - Uses anon key by default
+ * - If a Supabase access token is present in cookies, forwards it as a Bearer token
+ * - Honors custom schema via NEXT_PUBLIC_SUPABASE_SCHEMA
  */
 export async function createServerPageClient() {
-  const cookieStore = cookies();
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  const schema = process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || 'public';
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value;
-        },
-        set() {
-          /* no-op for RSC reads */
-        },
-        remove() {
-          /* no-op for RSC reads */
-        },
-      },
-    }
-  );
+  // Try common cookie names where the access token may live
+  const jar = cookies();
+  const accessToken =
+    jar.get('sb-access-token')?.value ??
+    jar.get('access-token')?.value ??
+    jar.get('supabase-auth-token')?.value; // fallback
+
+  const supabase = createClient(url, anon, {
+    db: { schema },
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+    global: accessToken
+      ? { headers: { Authorization: `Bearer ${accessToken}` } }
+      : undefined,
+  });
 
   return supabase;
 }
