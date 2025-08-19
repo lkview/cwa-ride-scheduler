@@ -1,56 +1,103 @@
-'use client';
-import { useEffect, useState } from 'react';
-import { supabase } from '../../lib/supabaseClient';
-import AuthGate from '../../components/AuthGate';
+// app/emergency-contacts/page.tsx
+import Link from 'next/link';
+import { revalidatePath } from 'next/cache';
+import { createClient } from '@supabase/supabase-js';
 
-type Row = { id: string; name: string; phone: string; email: string | null; notes: string | null };
+export const dynamic = 'force-dynamic';
 
-export default function EmergencyContactsPage() {
-  const [rows, setRows] = useState<Row[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+type EmergencyContact = {
+  id: string;
+  name: string | null;
+  phone: string | null;
+  email: string | null;
+  notes: string | null;
+};
 
-  useEffect(() => {
-    (async () => {
-      const { data, error } = await supabase
-        .from('emergency_contacts')
-        .select('id, name, phone, email, notes')
-        .order('name');
-      if (error) setErr(error.message);
-      setRows(data || []);
-      setLoading(false);
-    })();
-  }, []);
+// --- Supabase config (server-only) ---
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const SCHEMA = process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || 'public';
+
+// Read the table on the server
+async function loadEmergencyContacts(): Promise<EmergencyContact[]> {
+  const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+  const { data, error } = await supabase
+    .schema(SCHEMA)
+    .from('emergency_contacts')
+    .select('id, name, phone, email, notes')
+    .order('name');
+  if (error) throw new Error(error.message);
+  return (data ?? []) as EmergencyContact[];
+}
+
+export default async function EmergencyContactsPage() {
+  // Server Action lives INSIDE the page
+  async function deleteEmergencyContact(formData: FormData) {
+    'use server';
+    const id = String(formData.get('id') ?? '');
+    if (!id) return;
+
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+    await supabase.schema(SCHEMA).from('emergency_contacts').delete().eq('id', id);
+
+    revalidatePath('/emergency-contacts');
+  }
+
+  let rows: EmergencyContact[] = [];
+  try {
+    rows = await loadEmergencyContacts();
+  } catch (e: any) {
+    return <div style={{ color: 'red' }}>Error loading emergency contacts: {e?.message ?? 'Unknown error'}</div>;
+  }
 
   return (
-    <AuthGate>
-      <h1 className="text-xl font-semibold mb-3">Emergency Contacts</h1>
-      {loading && <div>Loading…</div>}
-      {err && <div className="text-red-600">{err}</div>}
-      {!loading && !err && (
-        <div className="overflow-x-auto rounded border bg-white">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-100 text-left">
-              <tr>
-                <th className="px-3 py-2">Name</th>
-                <th className="px-3 py-2">Phone</th>
-                <th className="px-3 py-2">Email</th>
-                <th className="px-3 py-2">Notes</th>
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h1>Emergency Contacts</h1>
+        <Link href="/emergency-contacts/new" className="underline">New Emergency Contact</Link>
+      </div>
+
+      <div style={{ marginTop: 12, overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Name</th>
+              <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Phone</th>
+              <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Email</th>
+              <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Notes</th>
+              <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id}>
+                <td style={{ borderBottom: '1px solid #eee', padding: 8 }}>{r.name}</td>
+                <td style={{ borderBottom: '1px solid #eee', padding: 8 }}>{r.phone}</td>
+                <td style={{ borderBottom: '1px solid #eee', padding: 8 }}>{r.email}</td>
+                <td style={{ borderBottom: '1px solid #eee', padding: 8 }}>{r.notes}</td>
+                <td style={{ borderBottom: '1px solid #eee', padding: 8 }}>
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    <Link href={`/emergency-contacts/${r.id}/edit`} className="underline">Edit</Link>
+                    <form action={deleteEmergencyContact}>
+                      <input type="hidden" name="id" value={r.id} />
+                      <button type="submit" className="underline" aria-label={`Delete ${r.name}`}>
+                        Delete
+                      </button>
+                    </form>
+                  </div>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {rows.map(r => (
-                <tr key={r.id} className="border-t">
-                  <td className="px-3 py-2">{r.name}</td>
-                  <td className="px-3 py-2">{r.phone}</td>
-                  <td className="px-3 py-2">{r.email ?? '—'}</td>
-                  <td className="px-3 py-2">{r.notes ?? '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </AuthGate>
+            ))}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={5} style={{ padding: 16, textAlign: 'center', color: '#666' }}>
+                  No emergency contacts yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }

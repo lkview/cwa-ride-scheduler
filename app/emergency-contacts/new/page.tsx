@@ -1,58 +1,51 @@
 // app/emergency-contacts/new/page.tsx
-'use client';
+import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
+import { createClient } from '@supabase/supabase-js';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabaseClient';
+export const dynamic = 'force-dynamic';
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const SCHEMA = process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || 'public';
 
 export default function NewEmergencyContactPage() {
-  const r = useRouter();
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
-  const [notes, setNotes] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  async function createContact(formData: FormData) {
+    'use server';
+    const name = String(formData.get('name') ?? '').trim();
+    const phone = String(formData.get('phone') ?? '').trim();
+    const email = (String(formData.get('email') ?? '').trim() || null) as string | null;
+    const notes = (String(formData.get('notes') ?? '').trim() || null) as string | null;
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setErr(null);
-    setBusy(true);
-    try {
-      // Get the user's session token and forward it to the API route
-      const { data: { session } } = await supabase.auth.getSession();
-
-      const res = await fetch('/api/emergency-contacts', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
-        },
-        body: JSON.stringify({ name, phone, email, notes }),
-      });
-
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || 'Failed to create contact');
-      r.push('/emergency-contacts');
-    } catch (e: any) {
-      setErr(e.message || 'Unexpected error');
-    } finally {
-      setBusy(false);
+    if (!name || !phone) {
+      throw new Error('Name and Phone are required');
     }
+
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+    const { error } = await supabase
+      .schema(SCHEMA)
+      .from('emergency_contacts')
+      .insert({ name, phone, email, notes });
+
+    if (error) throw new Error(error.message);
+
+    revalidatePath('/emergency-contacts');
+    redirect('/emergency-contacts');
   }
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
-      <h1 className="text-2xl font-semibold mb-6">New Emergency Contact</h1>
-      <form onSubmit={onSubmit} className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <input className="border p-3 rounded" placeholder="Name" value={name} onChange={e => setName(e.target.value)} required />
-          <input className="border p-3 rounded" placeholder="Phone" value={phone} onChange={e => setPhone(e.target.value)} required />
+    <div>
+      <h1>New Emergency Contact</h1>
+      <form action={createContact} style={{ display: 'grid', gap: 12, maxWidth: 720 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <input name="name" placeholder="Name" required />
+          <input name="phone" placeholder="Phone" required />
         </div>
-        <input className="border p-3 rounded w-full" placeholder="Email (optional)" value={email} onChange={e => setEmail(e.target.value)} />
-        <textarea className="border p-3 rounded w-full" placeholder="Notes (optional)" value={notes} onChange={e => setNotes(e.target.value)} />
-        <button disabled={busy} className="border px-4 py-2 rounded">{busy ? 'Creating…' : 'Create Contact'}</button>
-        {err && <p className="text-red-600 mt-2">{err}</p>}
+        <input name="email" placeholder="Email (optional)" />
+        <textarea name="notes" placeholder="Notes (optional)" rows={4} />
+        <div>
+          <button type="submit">Create Contact</button>
+        </div>
       </form>
     </div>
   );
