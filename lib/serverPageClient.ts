@@ -4,8 +4,8 @@ import { cookies } from 'next/headers';
 
 /**
  * Server-side Supabase client for App Router pages (Server Components).
- * - Uses anon key by default
- * - If a Supabase access token is present in cookies, forwards it as a Bearer token
+ * - Uses anon key
+ * - Forwards a Supabase access token from cookies if present (so RLS can use auth.uid()).
  * - Honors custom schema via NEXT_PUBLIC_SUPABASE_SCHEMA
  */
 export async function createServerPageClient() {
@@ -13,8 +13,9 @@ export async function createServerPageClient() {
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
   const schema = process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || 'public';
 
-  // Try common cookie names where the access token may live
-  const jar = cookies();
+  // Next.js 15: cookies() is async → await it
+  const jar = await cookies();
+
   const accessToken =
     jar.get('sb-access-token')?.value ??
     jar.get('access-token')?.value ??
