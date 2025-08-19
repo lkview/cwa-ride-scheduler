@@ -5,66 +5,92 @@ import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 
-type Params = { params: { id: string } };
-
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const SCHEMA = process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || 'public';
 
+function adminClient() {
+  return createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+    db: { schema: SCHEMA },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
 async function loadContact(id: string) {
-  const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+  const supabase = adminClient();
   const { data, error } = await supabase
-    .schema(SCHEMA)
     .from('emergency_contacts')
     .select('id, name, phone, email, notes')
     .eq('id', id)
     .single();
-  if (error?.code === 'PGRST116') return null; // no rows
-  if (error) throw new Error(error.message);
+
+  if (error) {
+    // Surface 404 for missing rows; bubble others
+    if (error.code === 'PGRST116' || error.details?.includes('Results contain 0 rows'))
+      return null;
+    throw error;
+  }
   return data;
 }
 
-export default async function EditEmergencyContactPage({ params }: Params) {
-  const row = await loadContact(params.id);
+type PageProps = { params: Promise<{ id: string }> };
+
+export default async function EditEmergencyContactPage({ params }: PageProps) {
+  const { id } = await params;
+
+  const row = await loadContact(id);
   if (!row) notFound();
 
   async function updateContact(formData: FormData) {
     'use server';
-    const id = String(formData.get('id') ?? '');
+
     const name = String(formData.get('name') ?? '').trim();
     const phone = String(formData.get('phone') ?? '').trim();
     const email = (String(formData.get('email') ?? '').trim() || null) as string | null;
     const notes = (String(formData.get('notes') ?? '').trim() || null) as string | null;
 
-    if (!id || !name || !phone) throw new Error('Missing required fields');
+    if (!name || !phone) {
+      throw new Error('Name and phone are required.');
+    }
 
-    const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+    const supabase = adminClient();
     const { error } = await supabase
-      .schema(SCHEMA)
       .from('emergency_contacts')
       .update({ name, phone, email, notes })
       .eq('id', id);
 
-    if (error) throw new Error(error.message);
+    if (error) throw error;
 
     revalidatePath('/emergency-contacts');
     redirect('/emergency-contacts');
   }
 
   return (
-    <div>
+    <div style={{ maxWidth: 720 }}>
       <h1>Edit Emergency Contact</h1>
-      <form action={updateContact} style={{ display: 'grid', gap: 12, maxWidth: 720 }}>
-        <input type="hidden" name="id" defaultValue={row.id} />
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <input name="name" defaultValue={row.name ?? ''} required />
-          <input name="phone" defaultValue={row.phone ?? ''} required />
+
+      <form action={updateContact} style={{ display: 'grid', gap: 12 }}>
+        <div style={{ display: 'grid', gap: 8 }}>
+          <label htmlFor="name">Name *</label>
+          <input id="name" name="name" defaultValue={row.name ?? ''} required />
         </div>
-        <input name="email" defaultValue={row.email ?? ''} />
-        <textarea name="notes" defaultValue={row.notes ?? ''} rows={4} />
-        <div>
-          <button type="submit">Save Changes</button>
+
+        <div style={{ display: 'grid', gap: 8 }}>
+          <label htmlFor="phone">Phone *</label>
+          <input id="phone" name="phone" defaultValue={row.phone ?? ''} required />
         </div>
+
+        <div style={{ display: 'grid', gap: 8 }}>
+          <label htmlFor="email">Email (optional)</label>
+          <input id="email" name="email" defaultValue={row.email ?? ''} />
+        </div>
+
+        <div style={{ display: 'grid', gap: 8 }}>
+          <label htmlFor="notes">Notes (optional)</label>
+          <textarea id="notes" name="notes" defaultValue={row.notes ?? ''} />
+        </div>
+
+        <button type="submit">Save Changes</button>
       </form>
     </div>
   );
