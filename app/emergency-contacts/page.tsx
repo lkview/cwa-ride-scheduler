@@ -1,19 +1,58 @@
+// app/emergency-contacts/page.tsx
+
 import Link from 'next/link';
 import EcRowActions from '@/components/EcRowActions';
-import { createServerClient } from '@/lib/serverClient'; // same helper you already use on list pages, adjust import if needed
+import { createServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
 
 export const dynamic = 'force-dynamic';
 
+type EmergencyContact = {
+  id: string;
+  name: string | null;
+  phone: string | null;
+  email: string | null;
+  notes: string | null;
+};
+
+// Minimal Supabase client for Server Components (reads cookies only)
+async function createServerPageClient() {
+  const cookieStore = cookies();
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) {
+          return cookieStore.get(name)?.value;
+        },
+        // No-ops for Server Component reads
+        set() {},
+        remove() {},
+      },
+    }
+  );
+}
+
 export default async function EmergencyContactsPage() {
-  const supabase = await createServerClient();
+  const supabase = await createServerPageClient();
+  const schema = process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || 'public';
+
   const { data: rows, error } = await supabase
+    .schema(schema)
     .from('emergency_contacts')
-    .select('id, name, phone, email, notes')
+    .select<`${'id' | 'name' | 'phone' | 'email' | 'notes'}`>('id, name, phone, email, notes')
     .order('name');
 
   if (error) {
-    return <p className="text-red-700">Error: {error.message}</p>;
+    return (
+      <div className="text-red-700">
+        Error loading emergency contacts: {error.message}
+      </div>
+    );
   }
+
+  const data = (rows ?? []) as EmergencyContact[];
 
   return (
     <div className="space-y-4">
@@ -39,7 +78,7 @@ export default async function EmergencyContactsPage() {
             </tr>
           </thead>
           <tbody>
-            {(rows ?? []).map((r) => (
+            {data.map((r) => (
               <tr key={r.id} className="odd:bg-white even:bg-gray-50">
                 <td className="px-3 py-2 border-b">{r.name}</td>
                 <td className="px-3 py-2 border-b">{r.phone}</td>
