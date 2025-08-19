@@ -1,56 +1,58 @@
-'use client';
-import { useEffect, useState } from 'react';
-import { supabase } from '../../lib/supabaseClient';
-import AuthGate from '../../components/AuthGate';
+import Link from 'next/link';
+import EcRowActions from '@/components/EcRowActions';
+import { createServerClient } from '@/lib/serverClient'; // same helper you already use on list pages, adjust import if needed
 
-type Row = { id: string; name: string; phone: string; email: string | null; notes: string | null };
+export const dynamic = 'force-dynamic';
 
-export default function EmergencyContactsPage() {
-  const [rows, setRows] = useState<Row[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+export default async function EmergencyContactsPage() {
+  const supabase = await createServerClient();
+  const { data: rows, error } = await supabase
+    .from('emergency_contacts')
+    .select('id, name, phone, email, notes')
+    .order('name');
 
-  useEffect(() => {
-    (async () => {
-      const { data, error } = await supabase
-        .from('emergency_contacts')
-        .select('id, name, phone, email, notes')
-        .order('name');
-      if (error) setErr(error.message);
-      setRows(data || []);
-      setLoading(false);
-    })();
-  }, []);
+  if (error) {
+    return <p className="text-red-700">Error: {error.message}</p>;
+  }
 
   return (
-    <AuthGate>
-      <h1 className="text-xl font-semibold mb-3">Emergency Contacts</h1>
-      {loading && <div>Loading…</div>}
-      {err && <div className="text-red-600">{err}</div>}
-      {!loading && !err && (
-        <div className="overflow-x-auto rounded border bg-white">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-100 text-left">
-              <tr>
-                <th className="px-3 py-2">Name</th>
-                <th className="px-3 py-2">Phone</th>
-                <th className="px-3 py-2">Email</th>
-                <th className="px-3 py-2">Notes</th>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Emergency Contacts</h1>
+        <Link
+          href="/emergency-contacts/new"
+          className="inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
+        >
+          New Emergency Contact
+        </Link>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="min-w-full border border-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-3 py-2 text-left border-b">Name</th>
+              <th className="px-3 py-2 text-left border-b">Phone</th>
+              <th className="px-3 py-2 text-left border-b">Email</th>
+              <th className="px-3 py-2 text-left border-b">Notes</th>
+              <th className="px-3 py-2 text-left border-b">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(rows ?? []).map((r) => (
+              <tr key={r.id} className="odd:bg-white even:bg-gray-50">
+                <td className="px-3 py-2 border-b">{r.name}</td>
+                <td className="px-3 py-2 border-b">{r.phone}</td>
+                <td className="px-3 py-2 border-b">{r.email}</td>
+                <td className="px-3 py-2 border-b">{r.notes}</td>
+                <td className="px-3 py-2 border-b">
+                  <EcRowActions id={r.id} />
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {rows.map(r => (
-                <tr key={r.id} className="border-t">
-                  <td className="px-3 py-2">{r.name}</td>
-                  <td className="px-3 py-2">{r.phone}</td>
-                  <td className="px-3 py-2">{r.email ?? '—'}</td>
-                  <td className="px-3 py-2">{r.notes ?? '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </AuthGate>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
