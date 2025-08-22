@@ -29,6 +29,16 @@ const cleanPhone = (v: string | null | undefined) => {
   return digits.length ? digits : null;
 };
 
+const formatPhone = (v: string | null | undefined) => {
+  if (!v) return '—';
+  const digits = v.replace(/\D/g, '');
+  if (digits.length !== 10) return v;
+  const area = digits.slice(0,3);
+  const mid = digits.slice(3,6);
+  const last = digits.slice(6);
+  return `(${area}) ${mid}-${last}`;
+};
+
 function useSupabase(): SupabaseClient {
   const client = useMemo(() => {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -55,19 +65,32 @@ export default function PeoplePage() {
 
     const load = async () => {
       setLoading(true);
+      try {
+        const [rolesRes, rosterRes] = await Promise.all([
+          fetch('/api/roles', { cache: 'no-store' }),
+          fetch('/api/people/roster', { cache: 'no-store' }),
+        ]);
 
-      const [rolesRes, peopleRes] = await Promise.all([
-        supabase.from('roles').select('name').order('name'),
-        supabase
-          .from('people')
-          .select('id, first_name, last_name, phone, email, people_roles(role)')
-          .order('last_name', { ascending: true }),
-      ]);
+        const rolesJson = await rolesRes.json();
+        const rosterJson = await rosterRes.json();
 
-      if (!cancelled) {
-        setRoles(rolesRes.data?.map(r => r.name) ?? []);
-        setPeople((peopleRes.data as any as PersonRow[]) ?? []);
-        setLoading(false);
+        if (!cancelled) {
+          const rolesList = Array.isArray(rolesJson?.rows) ? rolesJson.rows.map((r:any) => r.name) : [];
+          setRoles(rolesList);
+
+          const rows = Array.isArray(rosterJson?.rows) ? rosterJson.rows : [];
+          const mapped: PersonRow[] = rows.map((r:any) => ({
+            id: r.id,
+            first_name: r.first_name ?? null,
+            last_name: r.last_name ?? null,
+            phone: r.phone ?? null,
+            email: r.email ?? null,
+            people_roles: Array.isArray(r.roles) ? r.roles.map((role:string) => ({ role })) : [],
+          }));
+          setPeople(mapped);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     };
 
@@ -109,11 +132,18 @@ export default function PeoplePage() {
   }, [people, query, sortBy]);
 
   const refresh = async () => {
-    const { data } = await supabase
-      .from('people')
-      .select('id, first_name, last_name, phone, email, people_roles(role)')
-      .order('last_name', { ascending: true });
-    setPeople((data as any as PersonRow[]) ?? []);
+    const res = await fetch('/api/people/roster', { cache: 'no-store' });
+    const json = await res.json();
+    const rows = Array.isArray(json?.rows) ? json.rows : [];
+    const mapped: PersonRow[] = rows.map((r:any) => ({
+      id: r.id,
+      first_name: r.first_name ?? null,
+      last_name: r.last_name ?? null,
+      phone: r.phone ?? null,
+      email: r.email ?? null,
+      people_roles: Array.isArray(r.roles) ? r.roles.map((role:string) => ({ role })) : [],
+    }));
+    setPeople(mapped);
   };
 
   const onDelete = async (id: string) => {
@@ -181,7 +211,7 @@ export default function PeoplePage() {
                   <tr key={p.id} className="border-t">
                     <td className="px-3 py-2">{fullName || '—'}</td>
                     <td className="px-3 py-2">{displayRoles || '—'}</td>
-                    <td className="px-3 py-2">{p.phone ?? '—'}</td>
+                    <td className="px-3 py-2">{formatPhone(p.phone)}</td>
                     <td className="px-3 py-2">{p.email ?? '—'}</td>
                     <td className="px-3 py-2">
                       <div className="flex gap-2">
