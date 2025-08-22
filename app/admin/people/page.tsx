@@ -169,12 +169,18 @@ export default function PeoplePage() {
 
   const onDelete = async (id: string) => {
     if (!confirm('Delete this person?')) return;
-    const { error } = await supabase.rpc('people_delete', { p_person_id: id });
-    if (error) {
-      alert(error.message);
-    } else {
-      await refresh();
+    const headers = await getAuthHeaders(supabase);
+    const res = await fetch('/api/people/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(headers ?? {}) },
+      body: JSON.stringify({ id }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({} as any));
+      alert(j?.error ?? 'Delete failed');
+      return;
     }
+    await refresh();
   };
 
   return (
@@ -324,7 +330,8 @@ function PersonModal({
       setError('First name is required.');
       return;
     }
-    const payload = {
+
+    const body = {
       p_first_name: first.trim(),
       p_last_name: last.trim() || null,
       p_phone: cleanPhone(phone),
@@ -334,18 +341,27 @@ function PersonModal({
 
     setSaving(true);
 
-    const res =
-      mode === 'new'
-        ? await supabase.rpc('people_insert_with_roles_v2', payload as any)
-        : await supabase.rpc('people_update_with_roles_v2', {
-            p_person_id: person!.id,
-            ...payload,
-          } as any);
+    const headers = await getAuthHeaders(supabase);
+    let res: Response;
+    if (mode === 'new') {
+      res = await fetch('/api/people/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(headers ?? {}) },
+        body: JSON.stringify(body),
+      });
+    } else {
+      res = await fetch('/api/people/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(headers ?? {}) },
+        body: JSON.stringify({ p_person_id: person!.id, ...body }),
+      });
+    }
 
     setSaving(false);
 
-    if ((res as any).error) {
-      setError((res as any).error.message);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({} as any));
+      setError(j?.error ?? 'Save failed');
       return;
     }
 
