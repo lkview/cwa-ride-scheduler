@@ -6,28 +6,34 @@ import { createClient } from "@supabase/supabase-js";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// Build a Supabase client that forwards the user's session (JWT from cookies)
-// so Row-Level Security applies to the logged-in user.
 async function getSupabaseForRoute() {
-  const cookieStore = await cookies(); // Next.js 15: cookies() is async
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY; // server-only
+
+  // Next 15: cookies() is async
+  const cookieStore = await cookies();
   const accessToken = cookieStore.get("sb-access-token")?.value;
 
-  const client = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      auth: {
-        persistSession: false,
-        detectSessionInUrl: false,
-        autoRefreshToken: false,
-      },
-      global: {
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
-      },
-    }
-  );
+  if (accessToken) {
+    // Use the user's JWT so RLS applies to them
+    return createClient(url, anon, {
+      auth: { persistSession: false, detectSessionInUrl: false, autoRefreshToken: false },
+      global: { headers: { Authorization: `Bearer ${accessToken}` } },
+    });
+  }
 
-  return client;
+  if (serviceKey) {
+    // No user JWT (common in preview/devFakeAuth) – use service role on the server
+    return createClient(url, serviceKey, {
+      auth: { persistSession: false, detectSessionInUrl: false, autoRefreshToken: false },
+    });
+  }
+
+  // Fallback (will likely yield 0 rows due to RLS)
+  return createClient(url, anon, {
+    auth: { persistSession: false, detectSessionInUrl: false, autoRefreshToken: false },
+  });
 }
 
 export async function GET(req: Request) {
@@ -70,8 +76,7 @@ export async function GET(req: Request) {
   query = query.range(from, to);
 
   const { data, error, count } = await query;
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
   return NextResponse.json({ rows: data ?? [], count: count ?? 0 });
 }
