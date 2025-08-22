@@ -11,11 +11,14 @@ const supabase = createClient(
 const ALL_ROLES = ['pilot', 'passenger', 'emergency_contact'] as const;
 type Role = (typeof ALL_ROLES)[number];
 
-// --- Phone helpers (mirror the DB logic) ---
+// Name + phone helpers (mirror DB behavior)
+function cleanName(raw: string): string {
+  return raw.replace(/\s+/g, ' ').trim();
+}
 function cleanUsPhone(raw: string): string | null {
-  const digits = (raw || '').replace(/\D/g, '');
-  if (digits.length === 11 && digits.startsWith('1')) return digits.slice(1);
-  if (digits.length === 10) return digits;
+  const d = (raw || '').replace(/\D/g, '');
+  if (d.length === 11 && d.startsWith('1')) return d.slice(1);
+  if (d.length === 10) return d;
   return null;
 }
 function formatUsPhone(digits: string | null): string {
@@ -28,10 +31,11 @@ export default function AddPersonPage() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [canSchedule, setCanSchedule] = useState<boolean | null>(null);
 
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
-  const [roles, setRoles] = useState<Role[]>(['passenger']);
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName]   = useState('');
+  const [phone, setPhone]         = useState('');
+  const [email, setEmail]         = useState('');
+  const [roles, setRoles]         = useState<Role[]>(['passenger']);
 
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ id?: string; error?: string; ok?: string } | null>(null);
@@ -69,16 +73,19 @@ export default function AddPersonPage() {
     e.preventDefault();
     setResult(null);
 
-    // Required name
-    if (!name.trim()) {
-      setResult({ error: 'Name is required.' });
+    const fn = cleanName(firstName);
+    const ln = cleanName(lastName);
+
+    if (!fn) {
+      setResult({ error: 'First name is required.' });
       return;
     }
-    // Client-side phone check (optional field)
-    let normalized: string | null = null;
+
+    // Optional phone: pre-check for a US number
+    let normalizedPhone: string | null = null;
     if (phone.trim() !== '') {
-      normalized = cleanUsPhone(phone);
-      if (!normalized) {
+      normalizedPhone = cleanUsPhone(phone);
+      if (!normalizedPhone) {
         setResult({ error: 'Phone must be a valid US 10-digit number' });
         return;
       }
@@ -86,10 +93,11 @@ export default function AddPersonPage() {
 
     setSubmitting(true);
 
-    // RPC call – DB will re-check and normalize
-    const { data, error } = await supabase.rpc('people_insert_with_roles', {
-      p_name: name.trim(),
-      p_phone: phone.trim() === '' ? null : phone, // send what user typed; DB normalizes/validates
+    // Call the new RPC that accepts first/last names
+    const { data, error } = await supabase.rpc('people_insert_with_roles_v2', {
+      p_first_name: fn,
+      p_last_name: ln || null,
+      p_phone: phone.trim() === '' ? null : phone, // send original; DB revalidates/normalizes
       p_email: email.trim() || null,
       p_roles: roles,
     });
@@ -101,9 +109,10 @@ export default function AddPersonPage() {
       return;
     }
 
-    // Success: show message and format the field exactly as users expect
-    const finalDigits = normalized ?? cleanUsPhone(phone); // should match DB
-    setPhone(formatUsPhone(finalDigits));
+    // Success: normalize displayed values to match DB conventions
+    setFirstName(fn);
+    setLastName(ln);
+    setPhone(formatUsPhone(normalizedPhone ?? cleanUsPhone(phone)));
     setResult({ id: data as string, ok: 'Person created.' });
   };
 
@@ -144,15 +153,26 @@ export default function AddPersonPage() {
           </section>
 
           <form onSubmit={submit} className="rounded-md border p-4 space-y-4">
-            <div>
-              <label className="block text-sm font-medium">Full name</label>
-              <input
-                className="mt-1 w-full rounded border px-3 py-2"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                placeholder="e.g., Sam Passenger"
-                required
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium">First name</label>
+                <input
+                  className="mt-1 w-full rounded border px-3 py-2"
+                  value={firstName}
+                  onChange={e => setFirstName(e.target.value)}
+                  placeholder="e.g., Sam"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium">Last name (optional)</label>
+                <input
+                  className="mt-1 w-full rounded border px-3 py-2"
+                  value={lastName}
+                  onChange={e => setLastName(e.target.value)}
+                  placeholder="e.g., Passenger"
+                />
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -213,7 +233,7 @@ export default function AddPersonPage() {
             </div>
 
             <p className="text-xs opacity-60">
-              Uses DB function <code>people_insert_with_roles</code>. Only{' '}
+              Uses DB function <code>people_insert_with_roles_v2</code>. Only{' '}
               <code>admin</code> or <code>scheduler</code> can succeed.
             </p>
           </form>
