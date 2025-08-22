@@ -6,22 +6,21 @@ import { createClient } from "@supabase/supabase-js";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function isPreviewMode() {
+function isPreview() {
   return process.env.NEXT_PUBLIC_ENV === "preview" || process.env.VERCEL_ENV === "preview";
 }
 
-async function getAccessTokenFromCookie(): Promise<string | undefined> {
-  const cookieStore = await cookies();
-  return cookieStore.get("sb-access-token")?.value || cookieStore.get("supabase-auth-token")?.value;
+async function getJWT(): Promise<string | undefined> {
+  const jar = await cookies();
+  return jar.get("sb-access-token")?.value || jar.get("supabase-auth-token")?.value;
 }
 
-async function getSupabaseClient() {
+async function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  const token = await getAccessTokenFromCookie();
-
+  const token = await getJWT();
   if (token) {
     return createClient(url, anon, {
       auth: { persistSession: false, detectSessionInUrl: false, autoRefreshToken: false },
@@ -29,9 +28,8 @@ async function getSupabaseClient() {
     });
   }
 
-  // In Preview only, allow service role to list roles for the UI.
-  if (serviceKey && isPreviewMode()) {
-    return createClient(url, serviceKey, {
+  if (service && isPreview()) {
+    return createClient(url, service, {
       auth: { persistSession: false, detectSessionInUrl: false, autoRefreshToken: false },
     });
   }
@@ -40,10 +38,8 @@ async function getSupabaseClient() {
 }
 
 export async function GET() {
-  const supabase = await getSupabaseClient();
-  if (!supabase) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const supabase = await getSupabase();
+  if (!supabase) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { data, error } = await supabase.from("roles").select("name").order("name");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

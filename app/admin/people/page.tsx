@@ -25,10 +25,7 @@ const AVAILABLE_ROLE_LABELS: Record<string, string> = {
 };
 
 const titleCaseRole = (value: string) =>
-  value
-    .split('_')
-    .map(w => (w ? w[0].toUpperCase() + w.slice(1) : w))
-    .join(' ');
+  value.split('_').map(w => (w ? w[0].toUpperCase() + w.slice(1) : w)).join(' ');
 
 const cleanPhone = (v: string | null | undefined) => {
   if (!v) return null;
@@ -102,9 +99,7 @@ export default function PeoplePage() {
     };
 
     load();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [supabase]);
 
   const filtered = useMemo(() => {
