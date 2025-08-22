@@ -25,7 +25,10 @@ const AVAILABLE_ROLE_LABELS: Record<string, string> = {
 };
 
 const titleCaseRole = (value: string) =>
-  value.split('_').map(w => (w ? w[0].toUpperCase() + w.slice(1) : w)).join(' ');
+  value
+    .split('_')
+    .map(w => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(' ');
 
 const cleanPhone = (v: string | null | undefined) => {
   if (!v) return null;
@@ -52,12 +55,21 @@ function useSupabase(): SupabaseClient {
   return client;
 }
 
+async function getAuthHeader(supabase: SupabaseClient) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.access_token) {
+    return { Authorization: `Bearer ${session.access_token}` };
+  }
+  return {};
+}
+
 export default function PeoplePage() {
   const supabase = useSupabase();
 
   const [people, setPeople] = useState<PersonRow[]>([]);
   const [roles, setRoles] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const [query, setQuery] = useState('');
   const [sortBy, setSortBy] = useState<'last' | 'role'>('last');
@@ -69,14 +81,21 @@ export default function PeoplePage() {
 
     const load = async () => {
       setLoading(true);
+      setError(null);
       try {
+        const headers = await getAuthHeader(supabase);
+
         const [rolesRes, rosterRes] = await Promise.all([
-          fetch('/api/roles', { cache: 'no-store' }),
-          fetch('/api/people/roster', { cache: 'no-store' }),
+          fetch('/api/roles', { cache: 'no-store', headers }),
+          fetch('/api/people/roster', { cache: 'no-store', headers }),
         ]);
 
-        const rolesJson = await rolesRes.json();
-        const rosterJson = await rosterRes.json();
+        if (rosterRes.status === 401) {
+          setError('Please sign in to view people.');
+        }
+
+        const rolesJson = await rolesRes.json().catch(() => ({}));
+        const rosterJson = await rosterRes.json().catch(() => ({}));
 
         if (!cancelled) {
           const rolesList = Array.isArray(rolesJson?.rows) ? rolesJson.rows.map((r:any) => r.name) : [];
@@ -99,7 +118,9 @@ export default function PeoplePage() {
     };
 
     load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [supabase]);
 
   const filtered = useMemo(() => {
@@ -134,8 +155,9 @@ export default function PeoplePage() {
   }, [people, query, sortBy]);
 
   const refresh = async () => {
-    const res = await fetch('/api/people/roster', { cache: 'no-store' });
-    const json = await res.json();
+    const headers = await getAuthHeader(supabase);
+    const res = await fetch('/api/people/roster', { cache: 'no-store', headers });
+    const json = await res.json().catch(() => ({}));
     const rows = Array.isArray(json?.rows) ? json.rows : [];
     const mapped: PersonRow[] = rows.map((r:any) => ({
       id: r.id,
@@ -185,6 +207,12 @@ export default function PeoplePage() {
           New person
         </button>
       </div>
+
+      {error && (
+        <div className="mb-3 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
 
       <div className="overflow-x-auto rounded border">
         <table className="w-full text-left">
@@ -319,8 +347,8 @@ function PersonModal({
 
     setSaving(false);
 
-    if (res.error) {
-      setError(res.error.message);
+    if ((res as any).error) {
+      setError((res as any).error.message);
       return;
     }
 

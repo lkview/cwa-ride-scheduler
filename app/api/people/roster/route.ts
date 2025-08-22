@@ -6,21 +6,25 @@ import { createClient } from "@supabase/supabase-js";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function isPreview() {
+function isPreviewMode() {
   return process.env.NEXT_PUBLIC_ENV === "preview" || process.env.VERCEL_ENV === "preview";
 }
 
-async function getJWT(): Promise<string | undefined> {
-  const jar = await cookies();
-  return jar.get("sb-access-token")?.value || jar.get("supabase-auth-token")?.value;
+async function getAccessTokenFromCookie(): Promise<string | undefined> {
+  const cookieStore = await cookies();
+  return (
+    cookieStore.get("sb-access-token")?.value ||
+    cookieStore.get("supabase-auth-token")?.value
+  );
 }
 
-async function getSupabase() {
+async function getSupabaseClient(tokenFromHeader?: string | null) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  const token = await getJWT();
+  const token = tokenFromHeader || (await getAccessTokenFromCookie());
+
   if (token) {
     return createClient(url, anon, {
       auth: { persistSession: false, detectSessionInUrl: false, autoRefreshToken: false },
@@ -28,8 +32,9 @@ async function getSupabase() {
     });
   }
 
-  if (service && isPreview()) {
-    return createClient(url, service, {
+  // In Preview only, allow service role to read the roster
+  if (serviceKey && isPreviewMode()) {
+    return createClient(url, serviceKey, {
       auth: { persistSession: false, detectSessionInUrl: false, autoRefreshToken: false },
     });
   }
@@ -37,9 +42,14 @@ async function getSupabase() {
   return null;
 }
 
-export async function GET() {
-  const supabase = await getSupabase();
-  if (!supabase) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function GET(req: Request) {
+  const authHeader = req.headers.get("authorization");
+  const tokenFromHeader = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+  const supabase = await getSupabaseClient(tokenFromHeader);
+  if (!supabase) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   const { data, error } = await supabase
     .from("people_roster_v")
