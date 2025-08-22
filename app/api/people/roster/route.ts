@@ -8,12 +8,10 @@ export const revalidate = 0;
 
 // Build a Supabase client that forwards the user's session (JWT from cookies)
 // so Row-Level Security applies to the logged-in user.
-function getSupabaseForRoute() {
-  const cookieStore = cookies();
+async function getSupabaseForRoute() {
+  const cookieStore = await cookies(); // Next.js 15: cookies() is async
   const accessToken = cookieStore.get("sb-access-token")?.value;
 
-  // This client uses your anon key but *acts as the user* by sending their JWT
-  // in the Authorization header.
   const client = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -39,7 +37,7 @@ export async function GET(req: Request) {
   const page = Math.max(1, Number(searchParams.get("page") || "1"));
   const pageSize = Math.min(Math.max(1, Number(searchParams.get("pageSize") || "200")), 500);
 
-  const supabase = getSupabaseForRoute();
+  const supabase = await getSupabaseForRoute();
 
   let query = supabase.from("people_roster_v").select("*", { count: "exact" });
 
