@@ -55,12 +55,9 @@ function useSupabase(): SupabaseClient {
   return client;
 }
 
-async function getAuthHeader(supabase: SupabaseClient) {
+async function getAuthHeaders(supabase: SupabaseClient): Promise<HeadersInit | undefined> {
   const { data: { session } } = await supabase.auth.getSession();
-  if (session?.access_token) {
-    return { Authorization: `Bearer ${session.access_token}` };
-  }
-  return {};
+  return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : undefined;
 }
 
 export default function PeoplePage() {
@@ -83,7 +80,7 @@ export default function PeoplePage() {
       setLoading(true);
       setError(null);
       try {
-        const headers = await getAuthHeader(supabase);
+        const headers = await getAuthHeaders(supabase);
 
         const [rolesRes, rosterRes] = await Promise.all([
           fetch('/api/roles', { cache: 'no-store', headers }),
@@ -94,14 +91,14 @@ export default function PeoplePage() {
           setError('Please sign in to view people.');
         }
 
-        const rolesJson = await rolesRes.json().catch(() => ({}));
-        const rosterJson = await rosterRes.json().catch(() => ({}));
+        const rolesJson = await rolesRes.json().catch(() => ({} as any));
+        const rosterJson = await rosterRes.json().catch(() => ({} as any));
 
         if (!cancelled) {
-          const rolesList = Array.isArray(rolesJson?.rows) ? rolesJson.rows.map((r:any) => r.name) : [];
+          const rolesList = Array.isArray((rolesJson as any)?.rows) ? (rolesJson as any).rows.map((r:any) => r.name) : [];
           setRoles(rolesList);
 
-          const rows = Array.isArray(rosterJson?.rows) ? rosterJson.rows : [];
+          const rows = Array.isArray((rosterJson as any)?.rows) ? (rosterJson as any).rows : [];
           const mapped: PersonRow[] = rows.map((r:any) => ({
             id: r.id,
             first_name: r.first_name ?? null,
@@ -155,10 +152,10 @@ export default function PeoplePage() {
   }, [people, query, sortBy]);
 
   const refresh = async () => {
-    const headers = await getAuthHeader(supabase);
+    const headers = await getAuthHeaders(supabase);
     const res = await fetch('/api/people/roster', { cache: 'no-store', headers });
-    const json = await res.json().catch(() => ({}));
-    const rows = Array.isArray(json?.rows) ? json.rows : [];
+    const json = await res.json().catch(() => ({} as any));
+    const rows = Array.isArray((json as any)?.rows) ? (json as any).rows : [];
     const mapped: PersonRow[] = rows.map((r:any) => ({
       id: r.id,
       first_name: r.first_name ?? null,
