@@ -3,15 +3,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-/**
- * Minimal, self-contained page to add a Person via the secure RPC
- * people_insert_with_roles (admin/scheduler only).
- *
- * Works on preview branches. Requires you to be logged in and your profile
- * role to be 'admin' or 'scheduler'.
- */
-
-// Create a browser Supabase client (public keys only)
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL as string,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string
@@ -19,6 +10,18 @@ const supabase = createClient(
 
 const ALL_ROLES = ['pilot', 'passenger', 'emergency_contact'] as const;
 type Role = (typeof ALL_ROLES)[number];
+
+// --- Phone helpers (mirror the DB logic) ---
+function cleanUsPhone(raw: string): string | null {
+  const digits = (raw || '').replace(/\D/g, '');
+  if (digits.length === 11 && digits.startsWith('1')) return digits.slice(1);
+  if (digits.length === 10) return digits;
+  return null;
+}
+function formatUsPhone(digits: string | null): string {
+  if (!digits || digits.length !== 10) return '';
+  return `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`;
+}
 
 export default function AddPersonPage() {
   const [sessionChecked, setSessionChecked] = useState(false);
@@ -31,17 +34,14 @@ export default function AddPersonPage() {
   const [roles, setRoles] = useState<Role[]>(['passenger']);
 
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ id?: string; error?: string } | null>(null);
+  const [result, setResult] = useState<{ id?: string; error?: string; ok?: string } | null>(null);
 
-  // Check login on mount
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setIsLoggedIn(!!data.session);
       setSessionChecked(true);
     });
   }, []);
-
-  // Optional: live session changes
   useEffect(() => {
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
       setIsLoggedIn(!!s);
@@ -50,16 +50,12 @@ export default function AddPersonPage() {
   }, []);
 
   const toggleRole = (r: Role) => {
-    setRoles(prev =>
-      prev.includes(r) ? prev.filter(x => x !== r) : [...prev, r]
-    );
+    setRoles(prev => (prev.includes(r) ? prev.filter(x => x !== r) : [...prev, r]));
   };
-
   const rolesLabel = useMemo(() => roles.join(', ') || '—', [roles]);
 
   const checkAccess = async () => {
     setCanSchedule(null);
-    // can_schedule_rides() returns boolean, granted to 'authenticated'
     const { data, error } = await supabase.rpc('can_schedule_rides');
     if (error) {
       setResult({ error: error.message });
@@ -71,33 +67,44 @@ export default function AddPersonPage() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitting(true);
     setResult(null);
 
-    // Basic form sanity
+    // Required name
     if (!name.trim()) {
-      setSubmitting(false);
       setResult({ error: 'Name is required.' });
       return;
     }
-    if (roles.length === 0) {
-      setSubmitting(false);
-      setResult({ error: 'Pick at least one role.' });
+    // Client-side phone check (optional field)
+    let normalized: string | null = null;
+    if (phone.trim() !== '') {
+      normalized = cleanUsPhone(phone);
+      if (!normalized) {
+        setResult({ error: 'Phone must be a valid US 10-digit number' });
+        return;
+      }
+    }
+
+    setSubmitting(true);
+
+    // RPC call – DB will re-check and normalize
+    const { data, error } = await supabase.rpc('people_insert_with_roles', {
+      p_name: name.trim(),
+      p_phone: phone.trim() === '' ? null : phone, // send what user typed; DB normalizes/validates
+      p_email: email.trim() || null,
+      p_roles: roles,
+    });
+
+    setSubmitting(false);
+
+    if (error) {
+      setResult({ error: error.message });
       return;
     }
 
-    // Call the secure RPC (DB enforces admin/scheduler)
-    const { data, error } = await supabase.rpc('people_insert_with_roles', {
-      p_name: name.trim(),
-      p_phone: phone.trim() || null,
-      p_email: email.trim() || null,
-      p_roles: roles, // string[]
-    });
-
-    if (error) setResult({ error: error.message });
-    else setResult({ id: data as string });
-
-    setSubmitting(false);
+    // Success: show message and format the field exactly as users expect
+    const finalDigits = normalized ?? cleanUsPhone(phone); // should match DB
+    setPhone(formatUsPhone(finalDigits));
+    setResult({ id: data as string, ok: 'Person created.' });
   };
 
   return (
@@ -110,8 +117,7 @@ export default function AddPersonPage() {
         <div className="rounded-md border p-4 bg-yellow-50">
           <p className="font-medium">Please sign in first.</p>
           <p className="text-sm opacity-80">
-            Use the same account you set to role <code>admin</code> (or{' '}
-            <code>scheduler</code>) in <code>public.profiles</code>. Then reload this page.
+            Use the account with role <code>admin</code> or <code>scheduler</code>.
           </p>
         </div>
       ) : (
@@ -133,7 +139,7 @@ export default function AddPersonPage() {
               )}
             </div>
             <p className="text-sm opacity-70">
-              (This calls <code>can_schedule_rides()</code> in the database.)
+              (Calls <code>can_schedule_rides()</code> in the database.)
             </p>
           </section>
 
@@ -156,8 +162,11 @@ export default function AddPersonPage() {
                   className="mt-1 w-full rounded border px-3 py-2"
                   value={phone}
                   onChange={e => setPhone(e.target.value)}
-                  placeholder="555-555-1212"
+                  placeholder="(678) 233-2332"
                 />
+                <p className="text-xs opacity-60 mt-1">
+                  If provided, must be a valid US number (10 digits).
+                </p>
               </div>
               <div>
                 <label className="block text-sm font-medium">Email (optional)</label>
@@ -195,19 +204,17 @@ export default function AddPersonPage() {
               >
                 {submitting ? 'Saving…' : 'Save person'}
               </button>
-              {result?.id && (
+              {result?.ok && result?.id && (
                 <span className="text-green-700">
-                  Created person with id <code>{result.id}</code>
+                  {result.ok} ID: <code>{result.id}</code>
                 </span>
               )}
-              {result?.error && (
-                <span className="text-red-700">Error: {result.error}</span>
-              )}
+              {result?.error && <span className="text-red-700">Error: {result.error}</span>}
             </div>
 
             <p className="text-xs opacity-60">
-              This uses the DB function <code>people_insert_with_roles</code> we created.
-              Only <code>admin</code> or <code>scheduler</code> can succeed.
+              Uses DB function <code>people_insert_with_roles</code>. Only{' '}
+              <code>admin</code> or <code>scheduler</code> can succeed.
             </p>
           </form>
         </>
