@@ -8,12 +8,8 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string
 );
 
-// Role precedence for sorting
-const ROLE_WEIGHT: Record<string, number> = {
-  pilot: 0,
-  passenger: 1,
-  emergency_contact: 2,
-};
+type Role = 'pilot' | 'passenger' | 'emergency_contact';
+const ALL_ROLES: Role[] = ['pilot', 'passenger', 'emergency_contact'];
 
 type PersonRow = {
   id: string;
@@ -23,15 +19,18 @@ type PersonRow = {
   phone: string | null;
   phone_formatted: string | null;
   email: string | null;
-  roles: string[];     // ['pilot','passenger',...]
-  roles_str: string;   // "pilot, passenger"
+  roles: string[];
+  roles_str: string;
   created_at: string;
 };
 
-type Role = 'pilot' | 'passenger' | 'emergency_contact';
-const ALL_ROLES: Role[] = ['pilot', 'passenger', 'emergency_contact'];
+const ROLE_WEIGHT: Record<string, number> = {
+  pilot: 0,
+  passenger: 1,
+  emergency_contact: 2,
+};
 
-// --- Helpers (mirror DB normalizers/formatters for UX) ---
+// ---------- helpers ----------
 function cleanName(v: string) {
   return v.replace(/\s+/g, ' ').trim();
 }
@@ -52,6 +51,42 @@ function roleSortKey(roles: string[]) {
   return best;
 }
 
+// ---------- stable Modal component (outside the page) ----------
+type ModalProps = {
+  title: string;
+  onClose: () => void;
+  onSubmit: (e: React.FormEvent) => void;
+  children: React.ReactNode;
+};
+function Modal({ title, onClose, onSubmit, children }: ModalProps) {
+  // close on ESC
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+      onMouseDown={onClose}  // click backdrop to close
+    >
+      <div
+        className="w-full max-w-xl rounded-lg bg-white p-5 shadow-xl"
+        onMouseDown={(e) => e.stopPropagation()} // don't close when clicking inside
+      >
+        <h2 className="text-lg font-semibold">{title}</h2>
+        <form onSubmit={onSubmit} className="mt-4 space-y-4">
+          {children}
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------- page ----------
 export default function PeopleAdminPage() {
   const [sessionChecked, setSessionChecked] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -61,15 +96,12 @@ export default function PeopleAdminPage() {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Search & sort state
   const [query, setQuery] = useState('');
   const [sortBy, setSortBy] = useState<'last' | 'role'>('last');
 
-  // New/Edit modals
   const [showNew, setShowNew] = useState(false);
   const [editRow, setEditRow] = useState<PersonRow | null>(null);
 
-  // Fields for form (re-used for New and Edit)
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName]   = useState('');
   const [phone, setPhone]         = useState('');
@@ -78,7 +110,7 @@ export default function PeopleAdminPage() {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // login/session
+  // auth session
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setIsLoggedIn(!!data.session);
@@ -91,25 +123,16 @@ export default function PeopleAdminPage() {
   }, []);
 
   const fetchAccess = async () => {
-    const { data, error } = await supabase.rpc('can_schedule_rides');
-    if (error) {
-      setCanSchedule(false);
-      return;
-    }
+    const { data } = await supabase.rpc('can_schedule_rides');
     setCanSchedule(!!data);
   };
 
   const fetchPeople = async () => {
     setLoading(true);
     setErrorMsg(null);
-    const { data, error } = await supabase
-      .from('people_index_v')
-      .select('*');
-    if (error) {
-      setErrorMsg(error.message);
-    } else {
-      setPeople((data as PersonRow[]) || []);
-    }
+    const { data, error } = await supabase.from('people_index_v').select('*');
+    if (error) setErrorMsg(error.message);
+    else setPeople((data as PersonRow[]) || []);
     setLoading(false);
   };
 
@@ -120,9 +143,8 @@ export default function PeopleAdminPage() {
     }
   }, [isLoggedIn]);
 
-  const toggleRole = (r: Role) => {
+  const toggleRole = (r: Role) =>
     setRoles(prev => (prev.includes(r) ? prev.filter(x => x !== r) : [...prev, r]));
-  };
 
   const resetForm = () => {
     setFirstName('');
@@ -134,48 +156,30 @@ export default function PeopleAdminPage() {
     setSubmitting(false);
   };
 
-  const openNew = () => {
-    resetForm();
-    setShowNew(true);
-  };
-
+  const openNew = () => { resetForm(); setShowNew(true); };
   const openEdit = (row: PersonRow) => {
     setEditRow(row);
-    setFirstName(row.first_name ? row.first_name : '');
-    setLastName(row.last_name ? row.last_name : '');
-    // prefer DB formatted phone for display
-    const digits = cleanUsPhone(row.phone ?? '');
-    setPhone(formatUsPhone(digits));
+    setFirstName(row.first_name ?? '');
+    setLastName(row.last_name ?? '');
+    setPhone(formatUsPhone(cleanUsPhone(row.phone ?? '')));
     setEmail(row.email ?? '');
     const rs = (row.roles || []) as Role[];
     setRoles(rs.length ? rs : ['passenger']);
     setFormError(null);
   };
+  const closeModals = () => { setShowNew(false); setEditRow(null); resetForm(); };
 
-  const closeModals = () => {
-    setShowNew(false);
-    setEditRow(null);
-    resetForm();
-  };
-
-  // Create
+  // create
   const submitNew = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
 
     const fn = cleanName(firstName);
     const ln = cleanName(lastName);
-    if (!fn) {
-      setFormError('First name is required.');
-      return;
-    }
-    let digits: string | null = null;
-    if (phone.trim() !== '') {
-      digits = cleanUsPhone(phone);
-      if (!digits) {
-        setFormError('Phone must be a valid US 10-digit number');
-        return;
-      }
+    if (!fn) return setFormError('First name is required.');
+
+    if (phone.trim() !== '' && !cleanUsPhone(phone)) {
+      return setFormError('Phone must be a valid US 10-digit number');
     }
 
     setSubmitting(true);
@@ -188,32 +192,24 @@ export default function PeopleAdminPage() {
     });
     setSubmitting(false);
 
-    if (error) {
-      setFormError(error.message);
-      return;
-    }
+    if (error) return setFormError(error.message);
+
     closeModals();
-    await fetchPeople();
+    fetchPeople();
   };
 
-  // Update
+  // update
   const submitEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editRow) return;
-    setFormError(null);
 
+    setFormError(null);
     const fn = cleanName(firstName);
     const ln = cleanName(lastName);
-    if (!fn) {
-      setFormError('First name is required.');
-      return;
-    }
-    if (phone.trim() !== '') {
-      const ok = cleanUsPhone(phone);
-      if (!ok) {
-        setFormError('Phone must be a valid US 10-digit number');
-        return;
-      }
+    if (!fn) return setFormError('First name is required.');
+
+    if (phone.trim() !== '' && !cleanUsPhone(phone)) {
+      return setFormError('Phone must be a valid US 10-digit number');
     }
 
     setSubmitting(true);
@@ -227,42 +223,30 @@ export default function PeopleAdminPage() {
     });
     setSubmitting(false);
 
-    if (error) {
-      setFormError(error.message);
-      return;
-    }
+    if (error) return setFormError(error.message);
+
     closeModals();
-    await fetchPeople();
+    fetchPeople();
   };
 
-  // Delete
+  // delete
   const deleteRow = async (row: PersonRow) => {
     if (!confirm(`Delete ${row.name || row.first_name || 'this person'}?`)) return;
     const { error } = await supabase.rpc('people_delete', { p_person_id: row.id });
-    if (error) {
-      alert(error.message);
-      return;
-    }
-    await fetchPeople();
+    if (error) { alert(error.message); return; }
+    fetchPeople();
   };
 
-  // Search & sort (client-side; fine for small data sets)
+  // search/sort
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     let list = people;
     if (q) {
       list = people.filter(p => {
         const hay = [
-          p.first_name ?? '',
-          p.last_name ?? '',
-          p.name ?? '',
-          p.email ?? '',
-          p.phone ?? '',
-          p.phone_formatted ?? '',
-          p.roles_str ?? '',
-        ]
-          .join(' ')
-          .toLowerCase();
+          p.first_name ?? '', p.last_name ?? '', p.name ?? '',
+          p.email ?? '', p.phone ?? '', p.phone_formatted ?? '', p.roles_str ?? '',
+        ].join(' ').toLowerCase();
         return hay.includes(q);
       });
     }
@@ -283,7 +267,6 @@ export default function PeopleAdminPage() {
     return [...list].sort(sortBy === 'role' ? byRole : byLast);
   }, [people, query, sortBy]);
 
-  // UI bits
   const Toolbar = (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-center gap-2">
@@ -303,107 +286,9 @@ export default function PeopleAdminPage() {
           <option value="role">Sort by role (then last)</option>
         </select>
       </div>
-      <button
-        className="rounded px-3 py-2 border bg-black text-white"
-        onClick={openNew}
-      >
+      <button className="rounded px-3 py-2 border bg-black text-white" onClick={openNew}>
         New person
       </button>
-    </div>
-  );
-
-  const Modal = ({
-    title,
-    onClose,
-    onSubmit,
-  }: {
-    title: string;
-    onClose: () => void;
-    onSubmit: (e: React.FormEvent) => void;
-  }) => (
-    <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-xl rounded-lg bg-white p-5 shadow-xl">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{title}</h2>
-          <button className="px-2 py-1 rounded border" onClick={onClose}>
-            Close
-          </button>
-        </div>
-
-        <form onSubmit={onSubmit} className="mt-4 space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium">First name</label>
-              <input
-                className="mt-1 w-full rounded border px-3 py-2"
-                value={firstName}
-                onChange={e => setFirstName(e.target.value)}
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium">Last name (optional)</label>
-              <input
-                className="mt-1 w-full rounded border px-3 py-2"
-                value={lastName}
-                onChange={e => setLastName(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium">Phone (optional)</label>
-              <input
-                className="mt-1 w-full rounded border px-3 py-2"
-                value={phone}
-                onChange={e => setPhone(e.target.value)}
-                placeholder="(678) 233-2332"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium">Email (optional)</label>
-              <input
-                className="mt-1 w-full rounded border px-3 py-2"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                placeholder="name@example.org"
-              />
-            </div>
-          </div>
-
-          <fieldset className="space-y-2">
-            <legend className="text-sm font-medium">Roles</legend>
-            <div className="flex flex-wrap gap-4">
-              {ALL_ROLES.map(r => (
-                <label key={r} className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={roles.includes(r)}
-                    onChange={() => toggleRole(r)}
-                  />
-                  <span>{r}</span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
-
-          {formError && <p className="text-red-700">{formError}</p>}
-
-          <div className="flex items-center gap-3">
-            <button
-              type="submit"
-              disabled={submitting}
-              className="rounded px-3 py-2 border bg-black text-white disabled:opacity-60"
-            >
-              {submitting ? 'Saving…' : 'Save'}
-            </button>
-            <button type="button" className="rounded px-3 py-2 border" onClick={onClose}>
-              Cancel
-            </button>
-          </div>
-        </form>
-      </div>
     </div>
   );
 
@@ -420,9 +305,7 @@ export default function PeopleAdminPage() {
       ) : canSchedule === false ? (
         <div className="rounded-md border p-4 bg-red-50">
           <p className="font-medium text-red-700">Access denied.</p>
-          <p className="text-sm opacity-70">
-            Only <code>admin</code> or <code>scheduler</code> can manage people.
-          </p>
+          <p className="text-sm opacity-70">Only <code>admin</code> or <code>scheduler</code> can manage people.</p>
         </div>
       ) : (
         <>
@@ -451,9 +334,7 @@ export default function PeopleAdminPage() {
                         {(p.first_name || '') + (p.last_name ? ' ' + p.last_name : '')}
                       </td>
                       <td className="p-3">
-                        {p.roles && p.roles.length
-                          ? p.roles.join(', ')
-                          : <span className="opacity-60">—</span>}
+                        {p.roles?.length ? p.roles.join(', ') : <span className="opacity-60">—</span>}
                       </td>
                       <td className="p-3">{p.phone_formatted || <span className="opacity-60">—</span>}</td>
                       <td className="p-3">{p.email || <span className="opacity-60">—</span>}</td>
@@ -462,10 +343,7 @@ export default function PeopleAdminPage() {
                           <button className="rounded px-2 py-1 border" onClick={() => openEdit(p)}>
                             Edit
                           </button>
-                          <button
-                            className="rounded px-2 py-1 border text-red-700"
-                            onClick={() => deleteRow(p)}
-                          >
+                          <button className="rounded px-2 py-1 border text-red-700" onClick={() => deleteRow(p)}>
                             Delete
                           </button>
                         </div>
@@ -473,27 +351,165 @@ export default function PeopleAdminPage() {
                     </tr>
                   ))}
                   {filtered.length === 0 && (
-                    <tr>
-                      <td className="p-3 opacity-60" colSpan={5}>No people match your search.</td>
-                    </tr>
+                    <tr><td className="p-3 opacity-60" colSpan={5}>No people match your search.</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
           )}
 
-          {/* New modal */}
+          {/* New */}
           {showNew && (
-            <Modal title="New person" onClose={closeModals} onSubmit={submitNew} />
+            <Modal title="New person" onClose={closeModals} onSubmit={submitNew}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium">First name</label>
+                  <input
+                    className="mt-1 w-full rounded border px-3 py-2"
+                    value={firstName}
+                    onChange={e => setFirstName(e.target.value)}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">Last name (optional)</label>
+                  <input
+                    className="mt-1 w-full rounded border px-3 py-2"
+                    value={lastName}
+                    onChange={e => setLastName(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium">Phone (optional)</label>
+                  <input
+                    className="mt-1 w-full rounded border px-3 py-2"
+                    value={phone}
+                    onChange={e => setPhone(e.target.value)}
+                    placeholder="(678) 233-2332"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">Email (optional)</label>
+                  <input
+                    className="mt-1 w-full rounded border px-3 py-2"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder="name@example.org"
+                  />
+                </div>
+              </div>
+
+              <fieldset className="space-y-2">
+                <legend className="text-sm font-medium">Roles</legend>
+                <div className="flex flex-wrap gap-4">
+                  {ALL_ROLES.map(r => (
+                    <label key={r} className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={roles.includes(r)}
+                        onChange={() => toggleRole(r)}
+                      />
+                      <span>{r}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+
+              {formError && <p className="text-red-700">{formError}</p>}
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="rounded px-3 py-2 border bg-black text-white disabled:opacity-60"
+                >
+                  {submitting ? 'Saving…' : 'Save'}
+                </button>
+                <button type="button" className="rounded px-3 py-2 border" onClick={closeModals}>
+                  Cancel
+                </button>
+              </div>
+            </Modal>
           )}
 
-          {/* Edit modal */}
+          {/* Edit */}
           {editRow && (
-            <Modal
-              title={`Edit: ${editRow.name || editRow.first_name || ''}`}
-              onClose={closeModals}
-              onSubmit={submitEdit}
-            />
+            <Modal title={`Edit: ${editRow.name || editRow.first_name || ''}`} onClose={closeModals} onSubmit={submitEdit}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium">First name</label>
+                  <input
+                    className="mt-1 w-full rounded border px-3 py-2"
+                    value={firstName}
+                    onChange={e => setFirstName(e.target.value)}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">Last name (optional)</label>
+                  <input
+                    className="mt-1 w-full rounded border px-3 py-2"
+                    value={lastName}
+                    onChange={e => setLastName(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium">Phone (optional)</label>
+                  <input
+                    className="mt-1 w-full rounded border px-3 py-2"
+                    value={phone}
+                    onChange={e => setPhone(e.target.value)}
+                    placeholder="(678) 233-2332"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">Email (optional)</label>
+                  <input
+                    className="mt-1 w-full rounded border px-3 py-2"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder="name@example.org"
+                  />
+                </div>
+              </div>
+
+              <fieldset className="space-y-2">
+                <legend className="text-sm font-medium">Roles</legend>
+                <div className="flex flex-wrap gap-4">
+                  {ALL_ROLES.map(r => (
+                    <label key={r} className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={roles.includes(r)}
+                        onChange={() => toggleRole(r)}
+                      />
+                      <span>{r}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+
+              {formError && <p className="text-red-700">{formError}</p>}
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="rounded px-3 py-2 border bg-black text-white disabled:opacity-60"
+                >
+                  {submitting ? 'Saving…' : 'Save'}
+                </button>
+                <button type="button" className="rounded px-3 py-2 border" onClick={closeModals}>
+                  Cancel
+                </button>
+              </div>
+            </Modal>
           )}
         </>
       )}
