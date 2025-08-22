@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 type PersonRow = {
   id: string;
@@ -9,7 +9,7 @@ type PersonRow = {
   last_name: string | null;
   phone: string | null;
   email: string | null;
-  people_roles: { role: string }[]; // joined roles
+  people_roles: { role: string }[];
 };
 
 type ModalState =
@@ -20,7 +20,7 @@ type ModalState =
 const titleCaseRole = (value: string) =>
   value
     .split('_')
-    .map(s => (s ? s[0].toUpperCase() + s.slice(1) : s))
+    .map(w => (w ? w[0].toUpperCase() + w.slice(1) : w))
     .join(' ');
 
 const cleanPhone = (v: string | null | undefined) => {
@@ -29,16 +29,27 @@ const cleanPhone = (v: string | null | undefined) => {
   return digits.length ? digits : null;
 };
 
+function useSupabase(): SupabaseClient {
+  const client = useMemo(() => {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    return createClient(url, key);
+  }, []);
+  return client;
+}
+
 export default function PeoplePage() {
-  const supabase = createClientComponentClient();
+  const supabase = useSupabase();
+
   const [people, setPeople] = useState<PersonRow[]>([]);
+  const [roles, setRoles] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+
   const [query, setQuery] = useState('');
   const [sortBy, setSortBy] = useState<'last' | 'role'>('last');
-  const [roles, setRoles] = useState<string[]>([]); // <-- dynamic from DB
+
   const [modal, setModal] = useState<ModalState>({ open: false });
 
-  // Load roles (dynamic) and people
   useEffect(() => {
     let cancelled = false;
 
@@ -68,6 +79,7 @@ export default function PeoplePage() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
+
     const base = people.map(p => ({
       ...p,
       rolesList: (p.people_roles ?? []).map(r => r.role),
@@ -93,7 +105,6 @@ export default function PeoplePage() {
         return (a.last ?? '').localeCompare(b.last ?? '');
       });
     }
-    // last name (default)
     return searched.sort((a, b) => (a.last ?? '').localeCompare(b.last ?? ''));
   }, [people, query, sortBy]);
 
@@ -105,7 +116,6 @@ export default function PeoplePage() {
     setPeople((data as any as PersonRow[]) ?? []);
   };
 
-  // Delete person with guard (DB RPC enforces references)
   const onDelete = async (id: string) => {
     if (!confirm('Delete this person?')) return;
     const { error } = await supabase.rpc('people_delete', { p_person_id: id });
@@ -163,7 +173,9 @@ export default function PeoplePage() {
               </tr>
             ) : filtered.length ? (
               filtered.map(p => {
-                const displayRoles = (p.people_roles ?? []).map(r => titleCaseRole(r.role)).join(', ');
+                const displayRoles = (p.people_roles ?? [])
+                  .map(r => titleCaseRole(r.role))
+                  .join(', ');
                 const fullName = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim();
                 return (
                   <tr key={p.id} className="border-t">
@@ -226,7 +238,7 @@ function PersonModal({
   onClose,
   onSaved,
 }: {
-  supabase: ReturnType<typeof createClientComponentClient>;
+  supabase: SupabaseClient;
   roles: string[];
   mode: 'new' | 'edit';
   person?: PersonRow;
@@ -238,10 +250,17 @@ function PersonModal({
   const [phone, setPhone] = useState(person?.phone ?? '');
   const [email, setEmail] = useState(person?.email ?? '');
   const [selected, setSelected] = useState<string[]>(
-    person ? (person.people_roles ?? []).map(r => r.role) : ['passenger'],
+    person ? (person.people_roles ?? []).map(r => r.role) : [],
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Default new person to "passenger" if that role exists
+  useEffect(() => {
+    if (mode === 'new' && selected.length === 0 && roles.includes('passenger')) {
+      setSelected(['passenger']);
+    }
+  }, [mode, roles, selected.length]);
 
   const toggleRole = (r: string) =>
     setSelected(prev => (prev.includes(r) ? prev.filter(x => x !== r) : [...prev, r]));
