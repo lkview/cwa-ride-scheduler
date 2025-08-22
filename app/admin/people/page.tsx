@@ -17,6 +17,13 @@ type ModalState =
   | { mode: 'edit'; open: true; person: PersonRow }
   | { open: false };
 
+const AVAILABLE_ROLE_LABELS: Record<string, string> = {
+  pilot: 'Pilot',
+  passenger: 'Passenger',
+  emergency_contact: 'Emergency Contact',
+  aspiring_pilot: 'Aspiring Pilot',
+};
+
 const titleCaseRole = (value: string) =>
   value
     .split('_')
@@ -175,6 +182,7 @@ export default function PeoplePage() {
           <option value="last">Sort by last name</option>
           <option value="role">Sort by role</option>
         </select>
+
         <button
           className="ml-auto rounded bg-black px-4 py-2 text-white"
           onClick={() => setModal({ mode: 'new', open: true })}
@@ -207,6 +215,7 @@ export default function PeoplePage() {
                   .map(r => titleCaseRole(r.role))
                   .join(', ');
                 const fullName = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim();
+
                 return (
                   <tr key={p.id} className="border-t">
                     <td className="px-3 py-2">{fullName || '—'}</td>
@@ -216,13 +225,13 @@ export default function PeoplePage() {
                     <td className="px-3 py-2">
                       <div className="flex gap-2">
                         <button
-                          className="rounded border px-3 py-1"
+                          className="rounded border px-3 py-1 text-sm"
                           onClick={() => setModal({ mode: 'edit', open: true, person: p })}
                         >
                           Edit
                         </button>
                         <button
-                          className="rounded border border-red-400 px-3 py-1 text-red-600"
+                          className="rounded border px-3 py-1 text-sm"
                           onClick={() => onDelete(p.id)}
                         >
                           Delete
@@ -247,8 +256,8 @@ export default function PeoplePage() {
         <PersonModal
           supabase={supabase}
           roles={roles}
-          mode={modal.mode}
-          person={modal.mode === 'edit' ? modal.person : undefined}
+          mode={(modal as any).mode ?? 'new'}
+          person={(modal as any).person}
           onClose={() => setModal({ open: false })}
           onSaved={async () => {
             setModal({ open: false });
@@ -285,27 +294,25 @@ function PersonModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Default new person to "passenger" if that role exists
-  useEffect(() => {
-    if (mode === 'new' && selected.length === 0 && roles.includes('passenger')) {
-      setSelected(['passenger']);
-    }
-  }, [mode, roles, selected.length]);
-
-  const toggleRole = (r: string) =>
+  const toggle = (r: string) =>
     setSelected(prev => (prev.includes(r) ? prev.filter(x => x !== r) : [...prev, r]));
 
   const onSubmit = async () => {
-    setSaving(true);
     setError(null);
 
+    if (!first.trim()) {
+      setError('First name is required.');
+      return;
+    }
     const payload = {
-      p_first_name: first.trim() || null,
+      p_first_name: first.trim(),
       p_last_name: last.trim() || null,
       p_phone: cleanPhone(phone),
       p_email: email.trim() || null,
       p_roles: selected,
     };
+
+    setSaving(true);
 
     const res =
       mode === 'new'
@@ -321,12 +328,13 @@ function PersonModal({
       setError(res.error.message);
       return;
     }
+
     await onSaved();
   };
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-3">
-      <div className="w-full max-w-3xl rounded bg-white p-6 shadow">
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4">
+      <div className="w-full max-w-2xl rounded bg-white p-6 shadow-lg">
         <h2 className="mb-4 text-xl font-semibold">
           {mode === 'new' ? 'New person' : `Edit: ${(person?.first_name ?? '') + ' ' + (person?.last_name ?? '')}`}
         </h2>
@@ -359,8 +367,8 @@ function PersonModal({
           <div className="flex flex-wrap gap-4">
             {roles.map(r => (
               <label key={r} className="flex items-center gap-2">
-                <input type="checkbox" checked={selected.includes(r)} onChange={() => toggleRole(r)} />
-                <span>{titleCaseRole(r)}</span>
+                <input type="checkbox" checked={selected.includes(r)} onChange={() => toggle(r)} />
+                <span>{AVAILABLE_ROLE_LABELS[r] ?? titleCaseRole(r)}</span>
               </label>
             ))}
           </div>
