@@ -46,7 +46,6 @@ export async function POST(req: Request) {
 
   const ride_ts_iso = new Date(`${ride_date}T${ride_time}:00`).toISOString();
 
-  // Try universal create (adapts to your table), then full, then simple
   let { data, error } = await supabase.rpc("rides_create_universal", {
     p_ride_ts: ride_ts_iso, p_pilot_id: pilot_id, p_passenger1_id: passenger1_id,
     p_passenger2_id: passenger2_id, p_emergency_contact_id: emergency_contact_id,

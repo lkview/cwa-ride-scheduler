@@ -44,6 +44,19 @@ function nameOf(p: RosterRow | null | undefined) {
   return (first + ' ' + last).trim();
 }
 
+// Clamp time to HH:00 or HH:30
+function clampToHalfHour(t: string): string {
+  // Accept 'HH:MM' or 'HH:MM:SS' formats
+  if (!t) return t;
+  const parts = t.split(':');
+  if (parts.length < 2) return t;
+  const hh = parts[0].padStart(2, '0');
+  const mm = parseInt(parts[1] || '0', 10);
+  const clamped = mm < 15 ? '00' : (mm < 45 ? '30' : '00');
+  const hourAdj = (mm >= 45) ? String((parseInt(hh,10)+1)%24).padStart(2,'0') : hh;
+  return `${hourAdj}:${clamped}`;
+}
+
 export default function HomePage() {
   const supabase = useSupabase();
   const [rides, setRides] = useState<RideRow[]>([]);
@@ -83,7 +96,6 @@ export default function HomePage() {
       const ridesJson = await r1.json();
       const peopleJson = await r2.json();
       const statusesJson = await r3.json();
-      // Filter out "planned" if present; default to Scheduled
       const s = (statusesJson.rows ?? []).filter((x:string) => x.toLowerCase() !== 'planned');
       setStatuses(s);
       setStatus('scheduled');
@@ -121,11 +133,12 @@ export default function HomePage() {
     setSaving(true);
     try {
       const headers = await authHeaders(supabase);
+      const timeClamped = clampToHalfHour(rideTime);
       const res = await fetch('/api/rides/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(headers ?? {}) },
         body: JSON.stringify({
-          ride_date: rideDate, ride_time: rideTime,
+          ride_date: rideDate, ride_time: timeClamped,
           title, notes,
           pilot_id: pilotId, passenger1_id: p1Id, passenger2_id: p2Id || null,
           emergency_contact_id: ecId, status
