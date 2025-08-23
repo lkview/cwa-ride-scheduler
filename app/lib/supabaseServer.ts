@@ -1,67 +1,68 @@
 import { cookies } from "next/headers";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-function parseAccessToken(value?: string): string | undefined {
-  if (!value) return undefined;
+type TokenJSON = { access_token?: string; refresh_token?: string } | undefined;
+
+function parseJSONCookie(raw?: string): TokenJSON {
+  if (!raw) return undefined;
   try {
-    const parsed = JSON.parse(value);
-    if (Array.isArray(parsed)) {
-      // Find first object with an access_token field
-      for (const item of parsed) {
-        if (item && typeof item === "object" && "access_token" in item && item.access_token) {
-          return String((item as any).access_token);
-        }
-      }
-    } else if (parsed && typeof parsed === "object" && "access_token" in parsed) {
-      const t = (parsed as any).access_token;
-      if (t) return String(t);
-    }
+    return JSON.parse(raw);
   } catch {
-    // not JSON; ignore
+    return undefined;
   }
-  return undefined;
 }
 
-async function getAccessTokenFromCookies(): Promise<string | undefined> {
+/**
+ * Server-side Supabase client for Route Handlers/pages.
+ * - Next.js 15: await cookies()
+ * - Sends Authorization: Bearer <access_token> so RLS sees the logged-in user
+ * - Uses the correct schema (dev in Preview by default; public in Production)
+ */
+export async function getServerSupabase(): Promise<SupabaseClient> {
   const cookieStore = await cookies();
 
-  // 1) New helpers cookie
-  const direct = cookieStore.get("sb-access-token")?.value;
-  if (direct) return direct;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anon) {
+    throw new Error("Missing Supabase env vars: NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  }
 
-  // 2) Legacy helpers cookie
-  const legacy = cookieStore.get("supabase-auth-token")?.value;
-  const fromLegacy = parseAccessToken(legacy);
-  if (fromLegacy) return fromLegacy;
+  // Resolve schema: explicit env var OR dev for previews, public for prod
+  const schema =
+    process.env.NEXT_PUBLIC_DB_SCHEMA ||
+    (process.env.VERCEL_ENV === "production" ? "public" : "dev");
 
-  // 3) v2 cookie pattern: sb-<project-ref>-auth-token
-  for (const c of cookieStore.getAll()) {
-    if (c.name.startsWith("sb-") && c.name.endsWith("-auth-token")) {
-      const t = parseAccessToken(c.value);
-      if (t) return t;
+  // 1) Try modern cookie (raw JWT)
+  let accessToken = cookieStore.get("sb-access-token")?.value;
+
+  // 2) Try project-scoped JSON cookie: sb-<project-ref>-auth-token
+  if (!accessToken) {
+    const match = url.match(/^https?:\/\/([a-z0-9-]+)\.supabase\.co/i);
+    const projectRef = match?.[1];
+    if (projectRef) {
+      const scoped = cookieStore.get(`sb-${projectRef}-auth-token`)?.value;
+      const parsed = parseJSONCookie(scoped);
+      accessToken = parsed?.access_token;
     }
   }
 
-  return undefined;
-}
-
-export async function getServerSupabase() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  const schema = process.env.NEXT_PUBLIC_DB_SCHEMA || "public";
-  if (!url || !anon) {
-    throw new Error("Missing Supabase env vars: NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  // 3) Try legacy JSON cookie
+  if (!accessToken) {
+    const legacy = parseJSONCookie(cookieStore.get("supabase-auth-token")?.value);
+    accessToken = legacy?.access_token;
   }
 
-  const accessToken = await getAccessTokenFromCookies();
-
-  const supabase = createClient(url, anon, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: {
-      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+  const client = createClient(url, anon, {
+    auth: {
+      persistSession: false,
+      detectSessionInUrl: false,
+      // We are injecting Authorization header below, so no need to store session server-side.
     },
+    global: accessToken
+      ? { headers: { Authorization: `Bearer ${accessToken}` } }
+      : undefined,
     db: { schema },
   });
 
-  return supabase;
+  return client;
 }
