@@ -1,4 +1,3 @@
-// app/api/rides/create/route.ts
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createClient } from "@supabase/supabase-js";
@@ -8,10 +7,7 @@ export const revalidate = 0;
 
 async function getAccessTokenFromCookie(): Promise<string | undefined> {
   const cookieStore = await cookies();
-  return (
-    cookieStore.get("sb-access-token")?.value ||
-    cookieStore.get("supabase-auth-token")?.value
-  );
+  return cookieStore.get("sb-access-token")?.value || cookieStore.get("supabase-auth-token")?.value;
 }
 
 async function getSupabaseClientStrict(tokenFromHeader?: string | null) {
@@ -20,7 +16,6 @@ async function getSupabaseClientStrict(tokenFromHeader?: string | null) {
 
   const token = tokenFromHeader || (await getAccessTokenFromCookie());
   if (!token) return null;
-
   return createClient(url, anon, {
     auth: { persistSession: false, detectSessionInUrl: false, autoRefreshToken: false },
     global: { headers: { Authorization: `Bearer ${token}` } },
@@ -35,22 +30,36 @@ export async function POST(req: Request) {
   if (!supabase) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => null);
-  const ride_date = body?.ride_date ? String(body.ride_date) : null;
-  const title = body?.title == null ? null : String(body.title);
-  const notes = body?.notes == null ? null : String(body.notes);
+  const ride_date: string | null = body?.ride_date ?? null;
+  const ride_time: string | null = body?.ride_time ?? null;
+  const title: string | null = body?.title ?? null;
+  const notes: string | null = body?.notes ?? null;
+  const pilot_id: string | null = body?.pilot_id ?? null;
+  const passenger1_id: string | null = body?.passenger1_id ?? null;
+  const passenger2_id: string | null = body?.passenger2_id ?? null;
+  const emergency_contact_id: string | null = body?.emergency_contact_id ?? null;
+  const status: string | null = body?.status ?? null;
 
-  if (!ride_date) return NextResponse.json({ error: "ride_date is required" }, { status: 422 });
-
-  const { data, error } = await supabase.rpc("rides_create_simple", {
-    p_ride_date: ride_date,
-    p_title: title,
-    p_notes: notes,
-  } as any);
-
-  if (error) {
-    const code = /insufficient_privilege/i.test(error.message) ? 403 : 400;
-    return NextResponse.json({ error: error.message }, { status: code });
+  if (!ride_date || !ride_time || !pilot_id || !passenger1_id || !emergency_contact_id || !status) {
+    return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
-  return NextResponse.json({ id: data }, { status: 201 });
+  const ride_ts_iso = new Date(`${ride_date}T${ride_time}:00`).toISOString();
+
+  // Try full create first, then simple
+  let { data, error } = await supabase.rpc("rides_create_full", {
+    p_ride_ts: ride_ts_iso, p_pilot_id: pilot_id, p_passenger1_id: passenger1_id,
+    p_passenger2_id: passenger2_id, p_emergency_contact_id: emergency_contact_id,
+    p_status: status, p_title: title, p_notes: notes
+  });
+
+  if (error) {
+    const r2 = await supabase.rpc("rides_create_simple", {
+      p_ride_date: ride_date, p_title: title, p_notes: notes
+    });
+    data = r2.data; error = r2.error;
+  }
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  return NextResponse.json({ id: data });
 }

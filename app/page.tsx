@@ -1,14 +1,31 @@
-// app/page.tsx
 'use client';
-
 import { useEffect, useMemo, useState } from 'react';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
+type RosterRow = {
+  id: string;
+  first_name: string;
+  last_name: string;
+  roles: string[];
+  roles_title: string;
+  phone: string | null;
+  email: string | null;
+};
+
 type RideRow = {
   id: string;
-  ride_date: string; // ISO date
+  ride_ts: string; // ISO
+  status: string;
   title: string | null;
   notes: string | null;
+  pilot_id: string | null;
+  pilot_name: string | null;
+  passenger1_id: string | null;
+  passenger1_name: string | null;
+  passenger2_id: string | null;
+  passenger2_name: string | null;
+  emergency_contact_id: string | null;
+  emergency_contact_name: string | null;
 };
 
 function useSupabase(): SupabaseClient {
@@ -20,133 +37,246 @@ async function authHeaders(supabase: SupabaseClient): Promise<HeadersInit | unde
   return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : undefined;
 }
 
-const fmt = new Intl.DateTimeFormat(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+function nameOf(p: RosterRow | null | undefined) {
+  if (!p) return '';
+  const first = p.first_name || '';
+  const last = p.last_name || '';
+  return (first + ' ' + last).trim();
+}
 
-export default function RidesHomePage() {
+export default function HomePage() {
   const supabase = useSupabase();
-  const [rows, setRows] = useState<RideRow[]>([]);
+  const [rides, setRides] = useState<RideRow[]>([]);
+  const [people, setPeople] = useState<RosterRow[]>([]);
+  const [statuses, setStatuses] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [modalOpen, setModalOpen] = useState(false);
 
-  const load = async () => {
+  // New ride modal state
+  const [show, setShow] = useState(false);
+  const [rideDate, setRideDate] = useState<string>('');
+  const [rideTime, setRideTime] = useState<string>('09:00');
+  const [title, setTitle] = useState<string>('');
+  const [notes, setNotes] = useState<string>('');
+  const [pilotId, setPilotId] = useState<string>('');
+  const [p1Id, setP1Id] = useState<string>('');
+  const [p2Id, setP2Id] = useState<string>('');
+  const [ecId, setEcId] = useState<string>('');
+  const [status, setStatus] = useState<string>('scheduled');
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
+
+  const pilots = useMemo(() => people.filter(p => p.roles?.includes('pilot')), [people]);
+  const ecs = useMemo(() => people.filter(p => p.roles?.includes('emergency_contact')), [people]);
+  const passengers = useMemo(() => people, [people]);
+
+  async function refreshAll() {
     setLoading(true);
     setError(null);
     try {
       const headers = await authHeaders(supabase);
-      const res = await fetch('/api/rides/list', { cache: 'no-store', headers });
-      if (res.status === 401) setError('Please sign in to view rides.');
-      const json = await res.json().catch(() => ({} as any));
-      const r = Array.isArray((json as any).rows) ? (json as any).rows : [];
-      setRows(r);
+      const [r1,r2,r3] = await Promise.all([
+        fetch('/api/rides/list', { cache: 'no-store', headers }),
+        fetch('/api/people/roster', { cache: 'no-store', headers }),
+        fetch('/api/rides/statuses', { cache: 'no-store', headers }),
+      ]);
+      const ridesJson = await r1.json();
+      const peopleJson = await r2.json();
+      const statusesJson = await r3.json();
+      setRides(ridesJson.rows ?? []);
+      setPeople(peopleJson.rows ?? []);
+      setStatuses(statusesJson.rows ?? []);
+      if ((statusesJson.rows ?? []).length > 0) setStatus(statusesJson.rows[0]);
+    } catch (e: any) {
+      setError(e?.message ?? 'Failed to load data');
     } finally {
       setLoading(false);
     }
-  };
+  }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { refreshAll(); }, []);
 
   const grouped = useMemo(() => {
-    const map = new Map<string, RideRow[]>();
-    for (const r of rows) {
-      const key = r.ride_date;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(r);
+    const m = new Map<string, RideRow[]>();
+    for (const r of rides) {
+      const d = new Date(r.ride_ts);
+      const key = d.toLocaleDateString();
+      if (!m.has(key)) m.set(key, []);
+      m.get(key)!.push(r);
     }
-    return Array.from(map.entries()).sort(([a],[b]) => a.localeCompare(b));
-  }, [rows]);
+    for (const arr of m.values()) {
+      arr.sort((a,b) => new Date(a.ride_ts).getTime() - new Date(b.ride_ts).getTime());
+    }
+    return Array.from(m.entries()).sort((a,b) => new Date(a[0]).getTime() - new Date(b[0]).getTime());
+  }, [rides]);
 
-  return (
-    <div>
-      <div className="mb-4 flex items-center gap-3">
-        <h1 className="text-2xl font-semibold">Rides</h1>
-        <button className="ml-auto rounded bg-black px-4 py-2 text-white" onClick={() => setModalOpen(true)}>
-          New ride
-        </button>
-      </div>
-
-      {error && <div className="mb-3 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
-
-      <div className="space-y-6">
-        {loading ? (
-          <div>Loading…</div>
-        ) : grouped.length === 0 ? (
-          <div className="rounded border bg-white p-4">No rides scheduled.</div>
-        ) : (
-          grouped.map(([date, items]) => (
-            <section key={date} className="rounded border bg-white">
-              <div className="border-b bg-gray-50 px-4 py-2 font-medium">{fmt.format(new Date(date))}</div>
-              <ul className="divide-y">
-                {items.map((r) => (
-                  <li key={r.id} className="px-4 py-3">
-                    <div className="font-medium">{r.title || 'Untitled ride'}</div>
-                    {r.notes && <div className="text-sm text-gray-600">{r.notes}</div>}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))
-        )}
-      </div>
-
-      {modalOpen && <NewRideModal supabase={supabase} onClose={() => setModalOpen(false)} onSaved={async () => { setModalOpen(false); await load(); }} />}
-    </div>
-  );
-}
-
-function NewRideModal({ supabase, onClose, onSaved }: { supabase: SupabaseClient; onClose: () => void; onSaved: () => void | Promise<void>; }) {
-  const [date, setDate] = useState<string>(() => new Date().toISOString().slice(0,10));
-  const [title, setTitle] = useState('');
-  const [notes, setNotes] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const onSubmit = async () => {
-    setError(null);
-    if (!date) { setError('Please choose a date.'); return; }
-    setSaving(true);
-    const headers = await authHeaders(supabase);
-    const res = await fetch('/api/rides/create', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(headers ?? {}) },
-      body: JSON.stringify({ ride_date: date, title: title.trim() || null, notes: notes.trim() || null }),
-    });
-    setSaving(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({} as any));
-      setError(j?.error ?? 'Create failed');
+  async function saveRide() {
+    setSaveErr(null);
+    if (!rideDate || !rideTime || !p1Id || !pilotId || !ecId || !status) {
+      setSaveErr('Please fill date, time, pilot, passenger 1, emergency contact, and status.');
       return;
     }
-    await onSaved();
-  };
+    setSaving(true);
+    try {
+      const headers = await authHeaders(supabase);
+      const res = await fetch('/api/rides/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(headers ?? {}) },
+        body: JSON.stringify({
+          ride_date: rideDate, ride_time: rideTime,
+          title, notes,
+          pilot_id: pilotId, passenger1_id: p1Id, passenger2_id: p2Id || null,
+          emergency_contact_id: ecId, status
+        })
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(()=>({}));
+        throw new Error(j.error || `Save failed (${res.status})`);
+      }
+      setShow(false);
+      setRideDate(''); setRideTime('09:00'); setTitle(''); setNotes('');
+      setPilotId(''); setP1Id(''); setP2Id(''); setEcId(''); setStatus(statuses[0] || 'scheduled');
+      await refreshAll();
+    } catch (e:any) {
+      setSaveErr(e.message ?? 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function personOption(p: RosterRow) {
+    return <option key={p.id} value={p.id}>{nameOf(p)} {p.roles_title ? `– ${p.roles_title}` : ''}</option>;
+  }
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4">
-      <div className="w-full max-w-lg rounded bg-white p-6 shadow-lg">
-        <h2 className="mb-4 text-xl font-semibold">New ride</h2>
-
-        <div className="grid gap-3">
-          <div>
-            <label className="mb-1 block text-sm">Date</label>
-            <input type="date" className="w-full rounded border px-3 py-2" value={date} onChange={(e) => setDate(e.target.value)} />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm">Title (optional)</label>
-            <input className="w-full rounded border px-3 py-2" value={title} onChange={(e) => setTitle(e.target.value)} />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm">Notes (optional)</label>
-            <textarea className="w-full rounded border px-3 py-2" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </div>
-        </div>
-
-        {error && <div className="mt-4 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
-
-        <div className="mt-6 flex items-center gap-3">
-          <button className="rounded bg-black px-4 py-2 text-white disabled:opacity-50" onClick={onSubmit} disabled={saving}>Save</button>
-          <button className="rounded border px-4 py-2" onClick={onClose} disabled={saving}>Cancel</button>
-        </div>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold">Rides</h1>
+        <button onClick={() => setShow(true)} className="px-4 py-2 rounded-md bg-black text-white hover:bg-zinc-800">New ride</button>
       </div>
+
+      {loading ? <div>Loading…</div> : error ? <div className="text-red-600">{error}</div> : (
+        grouped.length === 0 ? <div className="text-zinc-600">No rides scheduled.</div> : (
+          <div className="space-y-8">
+            {grouped.map(([date, arr]) => (
+              <div key={date}>
+                <h2 className="text-xl font-semibold mb-2">{date}</h2>
+                <div className="border rounded-md overflow-hidden">
+                  <table className="w-full">
+                    <thead className="bg-zinc-50">
+                      <tr className="text-left">
+                        <th className="p-3">Time</th>
+                        <th className="p-3">Status</th>
+                        <th className="p-3">Pilot</th>
+                        <th className="p-3">Passengers</th>
+                        <th className="p-3">Emergency Contact</th>
+                        <th className="p-3">Title</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {arr.map(r => {
+                        const t = new Date(r.ride_ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                        return (
+                          <tr key={r.id} className="border-t">
+                            <td className="p-3">{t}</td>
+                            <td className="p-3 capitalize">{r.status}</td>
+                            <td className="p-3">{r.pilot_name}</td>
+                            <td className="p-3">{[r.passenger1_name, r.passenger2_name].filter(Boolean).join(', ')}</td>
+                            <td className="p-3">{r.emergency_contact_name}</td>
+                            <td className="p-3">{r.title ?? ''}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      )}
+
+      {show && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center px-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl">
+            <div className="p-5 border-b flex items-center justify-between">
+              <h3 className="text-xl font-semibold">New ride</h3>
+              <button onClick={() => setShow(false)} className="text-zinc-500 hover:text-black">✕</button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Date</label>
+                  <input type="date" value={rideDate} onChange={e=>setRideDate(e.target.value)} className="w-full rounded-md border p-2"/>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Time</label>
+                  <input type="time" value={rideTime} onChange={e=>setRideTime(e.target.value)} className="w-full rounded-md border p-2"/>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Status</label>
+                  <select value={status} onChange={e=>setStatus(e.target.value)} className="w-full rounded-md border p-2 capitalize">
+                    {statuses.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Pilot</label>
+                  <select value={pilotId} onChange={e=>setPilotId(e.target.value)} className="w-full rounded-md border p-2">
+                    <option value="">Select a pilot</option>
+                    {pilots.map(personOption)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Emergency Contact</label>
+                  <select value={ecId} onChange={e=>setEcId(e.target.value)} className="w-full rounded-md border p-2">
+                    <option value="">Select emergency contact</option>
+                    {ecs.map(personOption)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Passenger 1</label>
+                  <select value={p1Id} onChange={e=>setP1Id(e.target.value)} className="w-full rounded-md border p-2">
+                    <option value="">Select passenger</option>
+                    {passengers.map(personOption)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Passenger 2 (optional)</label>
+                  <select value={p2Id} onChange={e=>setP2Id(e.target.value)} className="w-full rounded-md border p-2">
+                    <option value="">— None —</option>
+                    {passengers.map(personOption)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Title (optional)</label>
+                  <input type="text" value={title} onChange={e=>setTitle(e.target.value)} className="w-full rounded-md border p-2"/>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Notes (optional)</label>
+                  <input type="text" value={notes} onChange={e=>setNotes(e.target.value)} className="w-full rounded-md border p-2"/>
+                </div>
+              </div>
+
+              {saveErr && <div className="text-red-600">{saveErr}</div>}
+            </div>
+            <div className="p-5 border-t flex items-center justify-end gap-2">
+              <button onClick={() => setShow(false)} className="px-3 py-2 rounded-md border border-zinc-300 hover:bg-zinc-100">Cancel</button>
+              <button onClick={saveRide} disabled={saving} className="px-4 py-2 rounded-md bg-black text-white hover:bg-zinc-800 disabled:opacity-50">
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
