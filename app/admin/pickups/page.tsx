@@ -6,10 +6,10 @@ export const revalidate = 0;
 type ListPayload = { pickups: any[]; schemaUsed?: string; error?: string };
 
 async function fetchPickups(): Promise<ListPayload> {
-  // headers() is synchronous in Next server components
-  const h = headers();
-  const hostHeader = h.get("x-forwarded-host") || h.get("host") || "";
-  const proto = h.get("x-forwarded-proto") || "https";
+  // Next 15 types: headers() returns a Promise<ReadonlyHeaders>
+  const h = await headers();
+  const hostHeader = h.get("x-forwarded-host") ?? h.get("host") ?? "";
+  const proto = h.get("x-forwarded-proto") ?? "https";
   const baseUrl = hostHeader.startsWith("http") ? hostHeader : `${proto}://${hostHeader || "localhost"}`;
 
   try {
