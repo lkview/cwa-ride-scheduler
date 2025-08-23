@@ -1,38 +1,35 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createClient } from "@supabase/supabase-js";
+import { getServerSupabase } from "@/app/lib/supabaseServer";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+export async function POST(request: Request) {
+  const body = await request.json().catch(() => ({}));
+  const id = body.id;
+  if (!id) {
+    return NextResponse.json({ error: "Missing id" }, { status: 400 });
+  }
 
-async function getAccessTokenFromCookie(): Promise<string | undefined> {
-  const cookieStore = await cookies();
-  return cookieStore.get("sb-access-token")?.value || cookieStore.get("supabase-auth-token")?.value;
-}
+  const supabase = await getServerSupabase();
 
-async function getSupabaseClientStrict(tokenFromHeader?: string | null) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  const { data: anyRef, error: refErr } = await supabase
+    .from("ride_events")
+    .select("id")
+    .eq("pickup_location_id", id)
+    .limit(1);
 
-  const token = tokenFromHeader || (await getAccessTokenFromCookie());
-  if (!token) return null;
-  return createClient(url, anon, {
-    auth: { persistSession: false, detectSessionInUrl: false, autoRefreshToken: false },
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
-}
+  if (refErr) {
+    return NextResponse.json({ error: refErr.message }, { status: 400 });
+  }
 
-export async function POST(req: Request) {
-  const authHeader = req.headers.get("authorization");
-  const tokenFromHeader = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-  const supabase = await getSupabaseClientStrict(tokenFromHeader);
-  if (!supabase) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (anyRef && anyRef.length > 0) {
+    return NextResponse.json(
+      { error: "This pickup location is used by one or more rides and cannot be deleted." },
+      { status: 409 }
+    );
+  }
 
-  const body = await req.json().catch(() => null);
-  const id: string | null = body?.id || null;
-  if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
-
-  const { error } = await supabase.from('pickup_locations').delete().eq('id', id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  const { error } = await supabase.from("pickup_locations").delete().eq("id", id);
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 400 });
+  }
   return NextResponse.json({ ok: true });
 }
