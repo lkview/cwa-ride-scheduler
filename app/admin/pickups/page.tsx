@@ -3,20 +3,32 @@ import { headers } from "next/headers";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-async function fetchPickups() {
-  const h = await headers();
-  const host = h.get("x-forwarded-host") || h.get("host");
+type ListPayload = { pickups: any[]; schemaUsed?: string; error?: string };
+
+async function fetchPickups(): Promise<ListPayload> {
+  // headers() is synchronous in Next server components
+  const h = headers();
+  const hostHeader = h.get("x-forwarded-host") || h.get("host") || "";
   const proto = h.get("x-forwarded-proto") || "https";
-  const baseUrl = `${proto}://${host}`;
-  const res = await fetch(`${baseUrl}/api/pickups/list`, {
-    cache: "no-store",
-    headers: {
-      "Cache-Control": "no-store",
-      "Pragma": "no-cache",
-    },
-  });
-  const json = await res.json();
-  return json as { pickups: any[]; schemaUsed?: string; error?: string };
+  const baseUrl = hostHeader.startsWith("http") ? hostHeader : `${proto}://${hostHeader || "localhost"}`;
+
+  try {
+    const res = await fetch(`${baseUrl}/api/pickups/list`, {
+      cache: "no-store",
+      headers: {
+        "Cache-Control": "no-store",
+        "Pragma": "no-cache",
+      },
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return { pickups: [], schemaUsed: "(unknown)", error: `HTTP ${res.status} ${res.statusText}: ${text}` };
+    }
+    const json = (await res.json()) as ListPayload;
+    return json;
+  } catch (e: any) {
+    return { pickups: [], schemaUsed: "(unknown)", error: e?.message || "Failed to fetch list" };
+  }
 }
 
 export default async function AdminPickupsPage() {
