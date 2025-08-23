@@ -46,15 +46,21 @@ function nameOf(p: RosterRow | null | undefined) {
   return (first + ' ' + last).trim();
 }
 
-function clampToHalfHour(t: string): string {
-  if (!t) return t;
-  const parts = t.split(':');
-  if (parts.length < 2) return t;
-  const hh = parts[0].padStart(2, '0');
-  const mm = parseInt(parts[1] || '0', 10);
-  const clamped = mm < 15 ? '00' : (mm < 45 ? '30' : '00');
-  const hourAdj = (mm >= 45) ? String((parseInt(hh,10)+1)%24).padStart(2,'0') : hh;
-  return `${hourAdj}:${clamped}`;
+function hhmmLabel(hhmm: string) {
+  const [h, m] = hhmm.split(':').map(Number);
+  const hour = ((h + 11) % 12) + 1;
+  const ampm = h < 12 ? 'AM' : 'PM';
+  return `${hour}:${m.toString().padStart(2,'0')}${ampm}`;
+}
+
+function generateTimes(): string[] {
+  const out: string[] = [];
+  let h = 7, m = 0;
+  while (h < 20 || (h === 20 && m === 0)) { // until 8:00 PM inclusive
+    out.push(`${String(h).padStart(2,'0')}:${m===0?'00':'30'}`);
+    if (m === 0) m = 30; else { m = 0; h += 1; }
+  }
+  return out;
 }
 
 const dbToUiStatus = (db: string) => db === 'Tentative' ? 'Scheduled' : (db === 'Canceled' ? 'Cancelled' : db);
@@ -72,6 +78,7 @@ export default function HomePage() {
   const [show, setShow] = useState(false);
   const [rideDate, setRideDate] = useState<string>('');
   const [rideTime, setRideTime] = useState<string>('09:00');
+  const [takenTimes, setTakenTimes] = useState<string[]>([]);
   const [notes, setNotes] = useState<string>('');
   const [pilotId, setPilotId] = useState<string>('');
   const [p1Id, setP1Id] = useState<string>('');
@@ -120,6 +127,24 @@ export default function HomePage() {
 
   useEffect(() => { refreshAll(); }, []);
 
+  // Fetch taken times whenever date changes
+  useEffect(() => {
+    (async () => {
+      if (!rideDate) { setTakenTimes([]); return; }
+      try {
+        const headers = await authHeaders(supabase);
+        const res = await fetch(`/api/rides/taken-times?date=${encodeURIComponent(rideDate)}`, { cache: 'no-store', headers });
+        const j = await res.json();
+        const times: string[] = (j.rows ?? []).map((t: string) => t.slice(0,5)); // "HH:MM:SS" -> "HH:MM"
+        setTakenTimes(times);
+        // If current selected time is taken, clear it
+        if (times.includes(rideTime)) setRideTime('');
+      } catch {
+        // ignore; keep previous list
+      }
+    })();
+  }, [rideDate]);
+
   const grouped = useMemo(() => {
     const m = new Map<string, RideRow[]>();
     for (const r of rides) {
@@ -134,25 +159,33 @@ export default function HomePage() {
     return Array.from(m.entries()).sort((a,b) => new Date(a[0]).getTime() - new Date(b[0]).getTime());
   }, [rides]);
 
+  function firstMissingField(): string | null {
+    if (!rideDate) return 'Please select a date.';
+    if (!rideTime) return 'Please select a time.';
+    if (!pilotId) return 'Please select a pilot.';
+    if (!p1Id) return 'Please select passenger 1.';
+    if (!ecId) return 'Please select an emergency contact.';
+    if (!pickupId) return 'Please select a pickup location.';
+    if (!status) return 'Please select a status.';
+    return null;
+  }
+
   async function saveRide() {
-    setSaveErr(null);
-    if (!rideDate || !rideTime || !p1Id || !pilotId || !ecId || !status || !pickupId) {
-      setSaveErr('Please fill date, time, pilot, passenger 1, emergency contact, pickup location, and status.');
-      return;
-    }
+    const fieldMsg = firstMissingField();
+    if (fieldMsg) { setSaveErr(fieldMsg); return; }
     if (p1Id === pilotId || p2Id === pilotId || (p2Id && p2Id === p1Id)) {
       setSaveErr('Pilot and passengers must be different people.');
       return;
     }
     setSaving(true);
+    setSaveErr(null);
     try {
       const headers = await authHeaders(supabase);
-      const timeClamped = clampToHalfHour(rideTime);
       const res = await fetch('/api/rides/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(headers ?? {}) },
         body: JSON.stringify({
-          ride_date: rideDate, ride_time: timeClamped,
+          ride_date: rideDate, ride_time: rideTime,
           notes,
           pilot_id: pilotId, passenger1_id: p1Id, passenger2_id: p2Id || null,
           emergency_contact_id: ecId, pickup_location_id: pickupId,
@@ -177,6 +210,12 @@ export default function HomePage() {
   function personOption(p: RosterRow) {
     return <option key={p.id} value={p.id}>{nameOf(p)} {p.roles_title ? `– ${p.roles_title}` : ''}</option>;
   }
+
+  const allTimes = useMemo(() => generateTimes(), []);
+  const availableTimes = useMemo(
+    () => allTimes.filter(t => !takenTimes.includes(t)),
+    [allTimes, takenTimes]
+  );
 
   return (
     <div className="space-y-6">
@@ -239,7 +278,13 @@ export default function HomePage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">Time</label>
-                  <input type="time" step={1800} value={rideTime} onChange={e=>setRideTime(e.target.value)} className="w-full rounded-md border p-2"/>
+                  <select value={rideTime} onChange={e=>setRideTime(e.target.value)} className="w-full rounded-md border p-2">
+                    <option value="">Select time</option>
+                    {availableTimes.map(t => <option key={t} value={t}>{hhmmLabel(t)}</option>)}
+                  </select>
+                  {rideDate && availableTimes.length === 0 && (
+                    <div className="text-xs text-red-600 mt-1">No available times for this date.</div>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">Status</label>

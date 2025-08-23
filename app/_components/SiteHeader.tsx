@@ -23,6 +23,7 @@ export default function SiteHeader() {
           <nav className="ml-6 flex items-center gap-2">
             <Link href="/" className={linkClass('/')}>Home</Link>
             <Link href="/admin/people" className={linkClass('/admin/people')}>People</Link>
+            <Link href="/admin/pickups" className={linkClass('/admin/pickups')}>Pickup Locations</Link>
           </nav>
         </div>
         <div className="flex items-center gap-2">
