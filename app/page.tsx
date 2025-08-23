@@ -12,6 +12,8 @@ type RosterRow = {
   email: string | null;
 };
 
+type PickupRow = { id: string; name: string };
+
 type RideRow = {
   id: string;
   ride_ts: string; // ISO
@@ -55,50 +57,60 @@ function clampToHalfHour(t: string): string {
   return `${hourAdj}:${clamped}`;
 }
 
+const dbToUiStatus = (db: string) => db === 'Tentative' ? 'Scheduled' : (db === 'Canceled' ? 'Cancelled' : db);
+
 export default function HomePage() {
   const supabase = useSupabase();
   const [rides, setRides] = useState<RideRow[]>([]);
   const [people, setPeople] = useState<RosterRow[]>([]);
-  const [statuses, setStatuses] = useState<string[]>([]);
+  const [pickups, setPickups] = useState<PickupRow[]>([]);
+  const [statuses, setStatuses] = useState<string[]>(['Scheduled','Confirmed','Completed','Cancelled']);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // New ride modal state
   const [show, setShow] = useState(false);
   const [rideDate, setRideDate] = useState<string>('');
   const [rideTime, setRideTime] = useState<string>('09:00');
-  const [title, setTitle] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
   const [pilotId, setPilotId] = useState<string>('');
   const [p1Id, setP1Id] = useState<string>('');
   const [p2Id, setP2Id] = useState<string>('');
   const [ecId, setEcId] = useState<string>('');
-  const [status, setStatus] = useState<string>('scheduled');
+  const [pickupId, setPickupId] = useState<string>('');
+  const [status, setStatus] = useState<string>('Scheduled');
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
 
   const pilots = useMemo(() => people.filter(p => p.roles?.includes('pilot')), [people]);
   const ecs = useMemo(() => people.filter(p => p.roles?.includes('emergency_contact')), [people]);
   const passengers1 = useMemo(() => people.filter(p => p.id !== pilotId), [people, pilotId]);
-  const passengers2 = useMemo(() => people.filter(p => p.id !== pilotId && p.id !== p1Id), [people, pilotId, p1Id]);
+  const passengers2 = useMemo(
+    () => people.filter(p => p.id !== pilotId && p.id !== p1Id),
+    [people, pilotId, p1Id]
+  );
 
   async function refreshAll() {
     setLoading(true);
     setError(null);
     try {
       const headers = await authHeaders(supabase);
-      const [r1,r2,r3] = await Promise.all([
+      const [r1,r2,r3,r4] = await Promise.all([
         fetch('/api/rides/list', { cache: 'no-store', headers }),
         fetch('/api/people/roster', { cache: 'no-store', headers }),
         fetch('/api/rides/statuses', { cache: 'no-store', headers }),
+        fetch('/api/pickups/list', { cache: 'no-store', headers }),
       ]);
       const ridesJson = await r1.json();
       const peopleJson = await r2.json();
       const statusesJson = await r3.json();
-      const s = (statusesJson.rows ?? []).filter((x:string) => x.toLowerCase() !== 'planned');
-      setStatuses(s);
-      setStatus('scheduled');
-      setRides(ridesJson.rows ?? []);
+      const pickupsJson = await r4.json();
+      const s = (statusesJson.rows ?? []).map((x: string) => dbToUiStatus(x)).filter((x:string) => x !== 'Draft');
+      setStatuses(s.length ? s : ['Scheduled','Confirmed','Completed','Cancelled']);
+      setStatus('Scheduled');
+      setRides((ridesJson.rows ?? []).map((r:any) => ({...r, status: dbToUiStatus(r.status)})));
       setPeople(peopleJson.rows ?? []);
+      setPickups(pickupsJson.rows ?? []);
     } catch (e: any) {
       setError(e?.message ?? 'Failed to load data');
     } finally {
@@ -124,8 +136,8 @@ export default function HomePage() {
 
   async function saveRide() {
     setSaveErr(null);
-    if (!rideDate || !rideTime || !p1Id || !pilotId || !ecId || !status) {
-      setSaveErr('Please fill date, time, pilot, passenger 1, emergency contact, and status.');
+    if (!rideDate || !rideTime || !p1Id || !pilotId || !ecId || !status || !pickupId) {
+      setSaveErr('Please fill date, time, pilot, passenger 1, emergency contact, pickup location, and status.');
       return;
     }
     if (p1Id === pilotId || p2Id === pilotId || (p2Id && p2Id === p1Id)) {
@@ -141,9 +153,10 @@ export default function HomePage() {
         headers: { 'Content-Type': 'application/json', ...(headers ?? {}) },
         body: JSON.stringify({
           ride_date: rideDate, ride_time: timeClamped,
-          title, notes,
+          notes,
           pilot_id: pilotId, passenger1_id: p1Id, passenger2_id: p2Id || null,
-          emergency_contact_id: ecId, status
+          emergency_contact_id: ecId, pickup_location_id: pickupId,
+          status
         })
       });
       if (!res.ok) {
@@ -151,8 +164,8 @@ export default function HomePage() {
         throw new Error(j.error || `Save failed (${res.status})`);
       }
       setShow(false);
-      setRideDate(''); setRideTime('09:00'); setTitle(''); setNotes('');
-      setPilotId(''); setP1Id(''); setP2Id(''); setEcId(''); setStatus('scheduled');
+      setRideDate(''); setRideTime('09:00'); setNotes('');
+      setPilotId(''); setP1Id(''); setP2Id(''); setEcId(''); setPickupId(''); setStatus('Scheduled');
       await refreshAll();
     } catch (e:any) {
       setSaveErr(e.message ?? 'Save failed');
@@ -187,7 +200,6 @@ export default function HomePage() {
                         <th className="p-3">Pilot</th>
                         <th className="p-3">Passengers</th>
                         <th className="p-3">Emergency Contact</th>
-                        <th className="p-3">Title</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -196,11 +208,10 @@ export default function HomePage() {
                         return (
                           <tr key={r.id} className="border-t">
                             <td className="p-3">{t}</td>
-                            <td className="p-3 capitalize">{r.status}</td>
+                            <td className="p-3">{r.status}</td>
                             <td className="p-3">{r.pilot_name}</td>
                             <td className="p-3">{[r.passenger1_name, r.passenger2_name].filter(Boolean).join(', ')}</td>
                             <td className="p-3">{r.emergency_contact_name}</td>
-                            <td className="p-3">{r.title ?? ''}</td>
                           </tr>
                         );
                       })}
@@ -232,7 +243,7 @@ export default function HomePage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">Status</label>
-                  <select value={status} onChange={e=>setStatus(e.target.value)} className="w-full rounded-md border p-2 capitalize">
+                  <select value={status} onChange={e=>setStatus(e.target.value)} className="w-full rounded-md border p-2">
                     {statuses.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
@@ -272,18 +283,17 @@ export default function HomePage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1">Notes (optional)</label>
-                  <textarea rows={4} value={notes} onChange={e=>setNotes(e.target.value)} className="w-full rounded-md border p-2" />
-                </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Pickup location</label>
+                <select value={pickupId} onChange={e=>setPickupId(e.target.value)} className="w-full rounded-md border p-2">
+                  <option value="">Select pickup</option>
+                  {pickups.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
               </div>
 
-              <div className="grid grid-cols-1 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1">Title (optional)</label>
-                  <input type="text" value={title} onChange={e=>setTitle(e.target.value)} className="w-full rounded-md border p-2"/>
-                </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Notes (optional)</label>
+                <textarea rows={4} value={notes} onChange={e=>setNotes(e.target.value)} className="w-full rounded-md border p-2" />
               </div>
 
               {saveErr && <div className="text-red-600">{saveErr}</div>}

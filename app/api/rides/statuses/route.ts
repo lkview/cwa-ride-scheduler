@@ -11,5 +11,6 @@ export async function GET() {
 
   const { data, error } = await supabase.rpc("ride_statuses_list");
   if (!error && Array.isArray(data)) return NextResponse.json({ rows: data });
-  return NextResponse.json({ rows: ["scheduled","confirmed","completed","cancelled"] });
+  // fallback to DB values used in your CHECK
+  return NextResponse.json({ rows: ["Draft","Tentative","Confirmed","Completed","Canceled"] });
 }
