@@ -38,10 +38,14 @@ export async function GET(req: Request) {
   const supabase = await getSupabaseClient(tokenFromHeader);
   if (!supabase) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  let { data, error } = await supabase.rpc("rides_list_full");
+  let { data, error } = await supabase.rpc("rides_list_universal");
   if (error) {
-    const r2 = await supabase.rpc("rides_list_simple");
-    data = r2.data; error = r2.error;
+    const r2 = await supabase.rpc("rides_list_full");
+    if (!r2.error) { data = r2.data; error = null; }
+    else {
+      const r3 = await supabase.rpc("rides_list_simple");
+      data = r3.data; error = r3.error;
+    }
   }
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ rows: data ?? [] });

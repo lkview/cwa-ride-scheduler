@@ -83,10 +83,12 @@ export default function HomePage() {
       const ridesJson = await r1.json();
       const peopleJson = await r2.json();
       const statusesJson = await r3.json();
+      // Filter out "planned" if present; default to Scheduled
+      const s = (statusesJson.rows ?? []).filter((x:string) => x.toLowerCase() !== 'planned');
+      setStatuses(s);
+      setStatus('scheduled');
       setRides(ridesJson.rows ?? []);
       setPeople(peopleJson.rows ?? []);
-      setStatuses(statusesJson.rows ?? []);
-      if ((statusesJson.rows ?? []).length > 0) setStatus(statusesJson.rows[0]);
     } catch (e: any) {
       setError(e?.message ?? 'Failed to load data');
     } finally {
@@ -135,7 +137,7 @@ export default function HomePage() {
       }
       setShow(false);
       setRideDate(''); setRideTime('09:00'); setTitle(''); setNotes('');
-      setPilotId(''); setP1Id(''); setP2Id(''); setEcId(''); setStatus(statuses[0] || 'scheduled');
+      setPilotId(''); setP1Id(''); setP2Id(''); setEcId(''); setStatus('scheduled');
       await refreshAll();
     } catch (e:any) {
       setSaveErr(e.message ?? 'Save failed');
@@ -211,7 +213,7 @@ export default function HomePage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">Time</label>
-                  <input type="time" value={rideTime} onChange={e=>setRideTime(e.target.value)} className="w-full rounded-md border p-2"/>
+                  <input type="time" step={1800} value={rideTime} onChange={e=>setRideTime(e.target.value)} className="w-full rounded-md border p-2"/>
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">Status</label>
@@ -255,14 +257,17 @@ export default function HomePage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Notes (optional)</label>
+                  <textarea rows={4} value={notes} onChange={e=>setNotes(e.target.value)} className="w-full rounded-md border p-2" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4">
                 <div>
                   <label className="block text-sm font-medium mb-1">Title (optional)</label>
                   <input type="text" value={title} onChange={e=>setTitle(e.target.value)} className="w-full rounded-md border p-2"/>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">Notes (optional)</label>
-                  <input type="text" value={notes} onChange={e=>setNotes(e.target.value)} className="w-full rounded-md border p-2"/>
                 </div>
               </div>
 

@@ -9,7 +9,7 @@ export async function GET() {
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
   const supabase = createClient(url, anon, { auth: { persistSession: false } });
 
-  const { data, error } = await supabase.rpc("ride_statuses_list").select();
+  const { data, error } = await supabase.rpc("ride_statuses_list");
   if (!error && Array.isArray(data)) return NextResponse.json({ rows: data });
-  return NextResponse.json({ rows: ["planned","scheduled","confirmed","completed","cancelled"] });
+  return NextResponse.json({ rows: ["scheduled","confirmed","completed","cancelled"] });
 }
