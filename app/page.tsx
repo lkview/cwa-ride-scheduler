@@ -31,7 +31,10 @@ type RideRow = {
 };
 
 function useSupabase(): SupabaseClient {
-  return useMemo(() => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!), []);
+  return useMemo(() => createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  ), []);
 }
 
 async function authHeaders(supabase: SupabaseClient): Promise<HeadersInit | undefined> {
@@ -137,7 +140,7 @@ export default function HomePage() {
         const times: string[] = (j.rows ?? []).map((t: string) => t.slice(0,5));
         setTakenTimes(times);
         if (times.includes(rideTime)) setRideTime('');
-      } catch {}
+      } catch {/* ignore */}
     })();
   }, [rideDate]);
 
