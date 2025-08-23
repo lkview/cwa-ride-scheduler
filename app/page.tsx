@@ -12,7 +12,7 @@ type RosterRow = {
   email: string | null;
 };
 
-type PickupRow = { id: string; name: string };
+type PickupRow = { id: string; name: string; address?: string | null };
 
 type RideRow = {
   id: string;
@@ -56,7 +56,7 @@ function hhmmLabel(hhmm: string) {
 function generateTimes(): string[] {
   const out: string[] = [];
   let h = 7, m = 0;
-  while (h < 20 || (h === 20 && m === 0)) { // until 8:00 PM inclusive
+  while (h < 20 || (h === 20 && m === 0)) {
     out.push(`${String(h).padStart(2,'0')}:${m===0?'00':'30'}`);
     if (m === 0) m = 30; else { m = 0; h += 1; }
   }
@@ -77,7 +77,7 @@ export default function HomePage() {
   // New ride modal state
   const [show, setShow] = useState(false);
   const [rideDate, setRideDate] = useState<string>('');
-  const [rideTime, setRideTime] = useState<string>('09:00');
+  const [rideTime, setRideTime] = useState<string>('');
   const [takenTimes, setTakenTimes] = useState<string[]>([]);
   const [notes, setNotes] = useState<string>('');
   const [pilotId, setPilotId] = useState<string>('');
@@ -127,7 +127,6 @@ export default function HomePage() {
 
   useEffect(() => { refreshAll(); }, []);
 
-  // Fetch taken times whenever date changes
   useEffect(() => {
     (async () => {
       if (!rideDate) { setTakenTimes([]); return; }
@@ -135,13 +134,10 @@ export default function HomePage() {
         const headers = await authHeaders(supabase);
         const res = await fetch(`/api/rides/taken-times?date=${encodeURIComponent(rideDate)}`, { cache: 'no-store', headers });
         const j = await res.json();
-        const times: string[] = (j.rows ?? []).map((t: string) => t.slice(0,5)); // "HH:MM:SS" -> "HH:MM"
+        const times: string[] = (j.rows ?? []).map((t: string) => t.slice(0,5));
         setTakenTimes(times);
-        // If current selected time is taken, clear it
         if (times.includes(rideTime)) setRideTime('');
-      } catch {
-        // ignore; keep previous list
-      }
+      } catch {}
     })();
   }, [rideDate]);
 
@@ -197,7 +193,7 @@ export default function HomePage() {
         throw new Error(j.error || `Save failed (${res.status})`);
       }
       setShow(false);
-      setRideDate(''); setRideTime('09:00'); setNotes('');
+      setRideDate(''); setRideTime(''); setNotes('');
       setPilotId(''); setP1Id(''); setP2Id(''); setEcId(''); setPickupId(''); setStatus('Scheduled');
       await refreshAll();
     } catch (e:any) {
@@ -332,7 +328,7 @@ export default function HomePage() {
                 <label className="block text-sm font-medium mb-1">Pickup location</label>
                 <select value={pickupId} onChange={e=>setPickupId(e.target.value)} className="w-full rounded-md border p-2">
                   <option value="">Select pickup</option>
-                  {pickups.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {pickups.map(p => <option key={p.id} value={p.id}>{p.name}{p.address ? ` — ${p.address}` : ''}</option>)}
                 </select>
               </div>
 

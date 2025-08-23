@@ -29,7 +29,7 @@ export async function GET(req: Request) {
   const supabase = await getSupabaseClientStrict(tokenFromHeader);
   if (!supabase) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { data, error } = await supabase.from("pickup_locations").select("id,name").order("name", { ascending: true });
+  const { data, error } = await supabase.from("pickup_locations").select("id,name,address,notes").order("name", { ascending: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ rows: data ?? [] });
 }

@@ -31,9 +31,11 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const id: string | null = body?.id || null;
   const name: string | null = (body?.name || '').trim() || null;
-  if (!id || !name) return NextResponse.json({ error: "Missing id or name" }, { status: 400 });
+  const address: string | null = (body?.address || '').trim() || null;
+  const notes: string | null = (body?.notes || '').trim() || null;
+  if (!id || !name || !address) return NextResponse.json({ error: "Missing id, name, or address" }, { status: 400 });
 
-  const { error } = await supabase.from('pickup_locations').update({ name }).eq('id', id);
+  const { error } = await supabase.from('pickup_locations').update({ name, address, notes: notes || null }).eq('id', id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ ok: true });
 }

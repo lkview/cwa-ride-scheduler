@@ -30,9 +30,12 @@ export async function POST(req: Request) {
 
   const body = await req.json().catch(() => null);
   const name: string | null = (body?.name || '').trim() || null;
+  const address: string | null = (body?.address || '').trim() || null;
+  const notes: string | null = (body?.notes || '').trim() || null;
   if (!name) return NextResponse.json({ error: "Name is required" }, { status: 400 });
+  if (!address) return NextResponse.json({ error: "Address is required" }, { status: 400 });
 
-  const { error } = await supabase.from('pickup_locations').insert({ name });
+  const { error } = await supabase.from('pickup_locations').insert({ name, address, notes: notes || null });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ ok: true });
 }
