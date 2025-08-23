@@ -44,9 +44,7 @@ function nameOf(p: RosterRow | null | undefined) {
   return (first + ' ' + last).trim();
 }
 
-// Clamp time to HH:00 or HH:30
 function clampToHalfHour(t: string): string {
-  // Accept 'HH:MM' or 'HH:MM:SS' formats
   if (!t) return t;
   const parts = t.split(':');
   if (parts.length < 2) return t;
@@ -65,7 +63,6 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // New ride modal state
   const [show, setShow] = useState(false);
   const [rideDate, setRideDate] = useState<string>('');
   const [rideTime, setRideTime] = useState<string>('09:00');
@@ -81,7 +78,8 @@ export default function HomePage() {
 
   const pilots = useMemo(() => people.filter(p => p.roles?.includes('pilot')), [people]);
   const ecs = useMemo(() => people.filter(p => p.roles?.includes('emergency_contact')), [people]);
-  const passengers = useMemo(() => people, [people]);
+  const passengers1 = useMemo(() => people.filter(p => p.id !== pilotId), [people, pilotId]);
+  const passengers2 = useMemo(() => people.filter(p => p.id !== pilotId && p.id !== p1Id), [people, pilotId, p1Id]);
 
   async function refreshAll() {
     setLoading(true);
@@ -128,6 +126,10 @@ export default function HomePage() {
     setSaveErr(null);
     if (!rideDate || !rideTime || !p1Id || !pilotId || !ecId || !status) {
       setSaveErr('Please fill date, time, pilot, passenger 1, emergency contact, and status.');
+      return;
+    }
+    if (p1Id === pilotId || p2Id === pilotId || (p2Id && p2Id === p1Id)) {
+      setSaveErr('Pilot and passengers must be different people.');
       return;
     }
     setSaving(true);
@@ -239,7 +241,7 @@ export default function HomePage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium mb-1">Pilot</label>
-                  <select value={pilotId} onChange={e=>setPilotId(e.target.value)} className="w-full rounded-md border p-2">
+                  <select value={pilotId} onChange={e=>{ setPilotId(e.target.value); if (e.target.value === p1Id) setP1Id(''); if (e.target.value === p2Id) setP2Id(''); }} className="w-full rounded-md border p-2">
                     <option value="">Select a pilot</option>
                     {pilots.map(personOption)}
                   </select>
@@ -256,16 +258,16 @@ export default function HomePage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium mb-1">Passenger 1</label>
-                  <select value={p1Id} onChange={e=>setP1Id(e.target.value)} className="w-full rounded-md border p-2">
+                  <select value={p1Id} onChange={e=>{ setP1Id(e.target.value); if (e.target.value === p2Id) setP2Id(''); }} className="w-full rounded-md border p-2">
                     <option value="">Select passenger</option>
-                    {passengers.map(personOption)}
+                    {passengers1.map(personOption)}
                   </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">Passenger 2 (optional)</label>
-                  <select value={p2Id} onChange={e=>setP2Id(e.target.value)} className="w-full rounded-md border p-2">
+                  <select value={p2Id} onChange={e=>setP2Id(e.target.value)} className="w-full rounded-md border p-2" disabled={!p1Id}>
                     <option value="">— None —</option>
-                    {passengers.map(personOption)}
+                    {passengers2.map(personOption)}
                   </select>
                 </div>
               </div>
