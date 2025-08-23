@@ -1,68 +1,74 @@
 import { cookies } from "next/headers";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-
-type TokenJSON = { access_token?: string; refresh_token?: string } | undefined;
-
-function parseJSONCookie(raw?: string): TokenJSON {
-  if (!raw) return undefined;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
-}
+import { createClient } from "@supabase/supabase-js";
 
 /**
- * Server-side Supabase client for Route Handlers/pages.
- * - Next.js 15: await cookies()
- * - Sends Authorization: Bearer <access_token> so RLS sees the logged-in user
- * - Uses the correct schema (dev in Preview by default; public in Production)
+ * Server-side Supabase client for Next.js 15 route handlers.
+ * - Awaits cookies() (Next 15)
+ * - Reads access token from common Supabase cookies
+ * - Sends Authorization header so RLS treats requests as the logged-in user
+ * - Targets the correct schema (NEXT_PUBLIC_DB_SCHEMA or dev/public by env)
+ *
+ * IMPORTANT: No explicit SupabaseClient<> return type is used here so that
+ * TypeScript won't complain when a dynamic schema is supplied.
  */
-export async function getServerSupabase(): Promise<SupabaseClient> {
+export async function getServerSupabase() {
   const cookieStore = await cookies();
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !anon) {
-    throw new Error("Missing Supabase env vars: NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY");
+    throw new Error("Missing Supabase env vars: NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY");
   }
 
-  // Resolve schema: explicit env var OR dev for previews, public for prod
+  // Resolve schema: explicit env overrides; otherwise dev for preview, public for prod
+  const vercelEnv = process.env.VERCEL_ENV || process.env.NEXT_PUBLIC_VERCEL_ENV || "";
   const schema =
     process.env.NEXT_PUBLIC_DB_SCHEMA ||
-    (process.env.VERCEL_ENV === "production" ? "public" : "dev");
+    (vercelEnv === "production" ? "public" : "dev");
 
-  // 1) Try modern cookie (raw JWT)
-  let accessToken = cookieStore.get("sb-access-token")?.value;
+  // Try to read an access token from known cookie names
+  const readAccessToken = (): string | undefined => {
+    const direct = cookieStore.get("sb-access-token")?.value;
+    if (direct) return direct;
 
-  // 2) Try project-scoped JSON cookie: sb-<project-ref>-auth-token
-  if (!accessToken) {
-    const match = url.match(/^https?:\/\/([a-z0-9-]+)\.supabase\.co/i);
-    const projectRef = match?.[1];
-    if (projectRef) {
-      const scoped = cookieStore.get(`sb-${projectRef}-auth-token`)?.value;
-      const parsed = parseJSONCookie(scoped);
-      accessToken = parsed?.access_token;
-    }
-  }
+    // Check for JSON cookies created by Supabase helpers
+    const tryParseJsonToken = (raw: string | undefined) => {
+      if (!raw) return undefined;
+      try {
+        const parsed = JSON.parse(raw);
+        // supabase-auth-token can be an array or object depending on helper version
+        if (Array.isArray(parsed)) {
+          // Newer helpers store an array of { access_token, refresh_token }
+          return parsed[0]?.access_token || parsed.find((x: any) => x?.access_token)?.access_token;
+        }
+        return parsed?.access_token;
+      } catch {
+        return undefined;
+      }
+    };
 
-  // 3) Try legacy JSON cookie
-  if (!accessToken) {
-    const legacy = parseJSONCookie(cookieStore.get("supabase-auth-token")?.value);
-    accessToken = legacy?.access_token;
-  }
+    const legacy = cookieStore.get("supabase-auth-token")?.value;
+    const legacyToken = tryParseJsonToken(legacy);
+    if (legacyToken) return legacyToken;
 
+    // sb-<project-ref>-auth-token
+    const all = (cookieStore as any).getAll?.() || [];
+    const proj = all.find((c: any) => typeof c?.name === "string" && /sb-[A-Za-z0-9_-]+-auth-token/.test(c.name));
+    const projToken = tryParseJsonToken(proj?.value);
+    if (projToken) return projToken;
+
+    return undefined;
+  };
+
+  const accessToken = readAccessToken();
+
+  // Build client. We pass schema + Authorization header.
   const client = createClient(url, anon, {
-    auth: {
-      persistSession: false,
-      detectSessionInUrl: false,
-      // We are injecting Authorization header below, so no need to store session server-side.
+    global: {
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
     },
-    global: accessToken
-      ? { headers: { Authorization: `Bearer ${accessToken}` } }
-      : undefined,
-    db: { schema },
+    db: { schema }, // dynamic schema (dev/public) without strict TS generics
   });
 
-  return client;
+  return client; // Intentionally untyped (lets TS infer)
 }
