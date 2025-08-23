@@ -5,16 +5,15 @@ import { createClient } from "@supabase/supabase-js";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-async function getAccessTokenFromCookie(): Promise<string | undefined> {
-  const cookieStore = await cookies();
+function getAccessTokenFromCookie(): string | undefined {
+  const cookieStore = cookies();
   return cookieStore.get("sb-access-token")?.value || cookieStore.get("supabase-auth-token")?.value;
 }
 
 async function getSupabaseClientStrict(tokenFromHeader?: string | null) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-  const token = tokenFromHeader || (await getAccessTokenFromCookie());
+  const token = tokenFromHeader || getAccessTokenFromCookie();
   if (!token) return null;
   return createClient(url, anon, {
     auth: { persistSession: false, detectSessionInUrl: false, autoRefreshToken: false },
@@ -38,7 +37,6 @@ export async function GET(req: Request) {
     .eq("date", date);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
   const rows = (data ?? []).map((r: any) => r.meeting_time);
   return NextResponse.json({ rows });
 }
