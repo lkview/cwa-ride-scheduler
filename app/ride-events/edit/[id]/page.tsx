@@ -3,7 +3,7 @@
 
 import React, { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import RideForm, { RideEvent } from "../../../components/RideForm";
+import RideForm, { RideEvent } from "../../../../components/RideForm";
 
 export default function EditRidePage() {
   const { id } = useParams<{ id: string }>();
@@ -20,15 +20,26 @@ export default function EditRidePage() {
         if (j?.error) throw new Error(j.error);
         const ride = j.ride as any;
         const mapped: Partial<RideEvent> = {
-          id: ride.id, date: ride.date, time: ride.meeting_time, status: ride.status,
-          pilot_id: ride.pilot_id, passenger1_id: ride.passenger1_id, passenger2_id: ride.passenger2_id,
-          emergency_contact_id: ride.emergency_contact_id, pickup_location_id: ride.pickup_location_id,
-          pre_ride_notes: ride.pre_ride_notes, post_ride_notes: ride.post_ride_notes,
+          id: ride.id,
+          date: ride.date,
+          time: ride.meeting_time,
+          status: ride.status,
+          pilot_id: ride.pilot_id,
+          passenger1_id: ride.passenger1_id,
+          passenger2_id: ride.passenger2_id,
+          emergency_contact_id: ride.emergency_contact_id,
+          pickup_location_id: ride.pickup_location_id,
+          pre_ride_notes: ride.pre_ride_notes,
+          post_ride_notes: ride.post_ride_notes,
         };
         if (!alive) return;
-        setInitial(mapped); setErr(null);
-      } catch (e: any) { setErr(e?.message ?? "Failed to load ride"); }
-      finally { if (alive) setLoading(false); }
+        setInitial(mapped);
+        setErr(null);
+      } catch (e: any) {
+        setErr(e?.message ?? "Failed to load ride");
+      } finally {
+        if (alive) setLoading(false);
+      }
     }
     load();
     return () => { alive = false; };
