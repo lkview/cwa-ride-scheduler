@@ -2,9 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 
-/** Named type export so pages can `import { RideEvent } from "components/RideForm"`.
- *  Extended to include fields used by edit page (e.g., `locked`).
- */
+/** Named type export so pages can `import { RideEvent } from "components/RideForm"`. */
 export type RideEvent = {
   id?: string;
   date?: string | null;
@@ -23,18 +21,6 @@ export type RideEvent = {
   updated_at?: string | null;
 };
 
-/**
- * Drop-in RideForm that pulls picker options from server routes:
- *   - /api/pickers/list  -> { pilots[], passengers[], emergencyContacts[] }
- *   - /api/pickups/list  -> { pickups[] }
- *
- * It also prevents selecting the same person in multiple roles by
- * filtering options live across Pilot, Passenger 1/2 and Emergency Contact.
- *
- * NOTE: Save behaviour is preserved: if parent passes a handler it is used;
- * otherwise we POST to /api/rides/create as a fallback.
- */
-
 type PersonOption = { id: string; display_name: string; email?: string; phone?: string };
 type PickupOption = { id: string; name: string; address?: string | null; notes?: string | null };
 
@@ -45,11 +31,10 @@ type PickersPayload = {
 };
 
 type RideFormProps = {
-  rideId?: string; // <-- added to satisfy edit page prop
+  rideId?: string;
   onCancel?: () => void;
   onSaved?: (rideId?: string) => void;
-  onSave?: (payload: any) => Promise<any> | any; // legacy compat
-  // allow passing initial values (all optional)
+  onSave?: (payload: any) => Promise<any> | any;
   initial?: Partial<RideEvent>;
 };
 
@@ -76,7 +61,9 @@ const RideForm: React.FC<RideFormProps> = (props) => {
   const [p1Id, setP1Id] = useState<string>(init.passenger1_id ?? "");
   const [p2Id, setP2Id] = useState<string>(init.passenger2_id ?? "");
   const [ecId, setEcId] = useState<string>(init.emergency_contact_id ?? "");
-  const [pickupId, setPickupId] = useState<string>((init.pickup_id ?? init.pickup_location_id) ?? "");
+  const [pickupId, setPickupId] = useState<string>(
+    (init.pickup_id ?? init.pickup_location_id) ?? ""
+  );
   const [notes, setNotes] = useState<string>(init.notes ?? "");
 
   // Options
@@ -89,6 +76,7 @@ const RideForm: React.FC<RideFormProps> = (props) => {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
+  // Load option lists from our API routes
   useEffect(() => {
     let alive = true;
     async function load() {
@@ -99,9 +87,19 @@ const RideForm: React.FC<RideFormProps> = (props) => {
           fetch("/api/pickups/list", { cache: "no-store" }).then((r) => r.json()),
         ]);
         if (!alive) return;
-        setPickers(p1 as PickersPayload);
-        setPickups((p2?.pickups ?? []) as PickupOption[]);
+
+        // Minimal shape-guarding in case something changes server-side
+        const safe: PickersPayload = {
+          pilots: Array.isArray(p1?.pilots) ? p1.pilots : [],
+          passengers: Array.isArray(p1?.passengers) ? p1.passengers : [],
+          emergencyContacts: Array.isArray(p1?.emergencyContacts) ? p1.emergencyContacts : [],
+        };
+        setPickers(safe);
+        setPickups((Array.isArray(p2?.pickups) ? p2.pickups : []) as PickupOption[]);
         setErr(null);
+
+        // Debug: log once so we can confirm what the form is actually using
+        console.log("[RideForm] pickers payload:", safe);
       } catch (e: any) {
         console.error("Failed loading pickers:", e);
         setErr(e?.message ?? "Failed loading options");
@@ -110,12 +108,10 @@ const RideForm: React.FC<RideFormProps> = (props) => {
       }
     }
     load();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, []);
 
-  // Prevent choosing same person twice (id-based)
+  // Prevent choosing the same person twice
   const selectedIds = [pilotId, p1Id, p2Id, ecId].filter(Boolean) as string[];
 
   const pilotOpts = useMemo(
@@ -154,17 +150,16 @@ const RideForm: React.FC<RideFormProps> = (props) => {
         props.onSaved?.(props.rideId);
         return;
       }
-      // Fallback generic POST (no-op if endpoint doesn't exist)
       const resp = await fetch("/api/rides/create", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
       }).catch(() => null);
+
       if (resp && resp.ok) {
         const j = await resp.json().catch(() => ({}));
         props.onSaved?.(j?.id ?? props.rideId);
       } else {
-        // Even if POST isn't available, we still close to preserve UX
         props.onSaved?.(props.rideId);
       }
     } catch (e) {
@@ -175,10 +170,13 @@ const RideForm: React.FC<RideFormProps> = (props) => {
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
+      {/* Visible debug so we can confirm this file is actually being used */}
+      <div className="px-3 py-2 text-sm rounded bg-yellow-50 text-yellow-800">
+        <strong>Debug:</strong> pilots={pickers.pilots.length} • ec={pickers.emergencyContacts.length} • passengers={pickers.passengers.length}
+      </div>
+
       {err && (
-        <div className="rounded bg-red-50 text-red-700 px-3 py-2 text-sm">
-          {err}
-        </div>
+        <div className="rounded bg-red-50 text-red-700 px-3 py-2 text-sm">{err}</div>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -215,9 +213,7 @@ const RideForm: React.FC<RideFormProps> = (props) => {
           >
             <option value="">Select a pilot</option>
             {pilotOpts.map((p) => (
-              <option key={p.id} value={p.id}>
-                {optionLabel(p)}
-              </option>
+              <option key={p.id} value={p.id}>{optionLabel(p)}</option>
             ))}
           </select>
         </label>
@@ -233,9 +229,7 @@ const RideForm: React.FC<RideFormProps> = (props) => {
           >
             <option value="">Select emergency contact</option>
             {ecOpts.map((p) => (
-              <option key={p.id} value={p.id}>
-                {optionLabel(p)}
-              </option>
+              <option key={p.id} value={p.id}>{optionLabel(p)}</option>
             ))}
           </select>
         </label>
@@ -251,9 +245,7 @@ const RideForm: React.FC<RideFormProps> = (props) => {
           >
             <option value="">Select passenger</option>
             {p1Opts.map((p) => (
-              <option key={p.id} value={p.id}>
-                {optionLabel(p)}
-              </option>
+              <option key={p.id} value={p.id}>{optionLabel(p)}</option>
             ))}
           </select>
         </label>
@@ -268,9 +260,7 @@ const RideForm: React.FC<RideFormProps> = (props) => {
           >
             <option value="">— None —</option>
             {p2Opts.map((p) => (
-              <option key={p.id} value={p.id}>
-                {optionLabel(p)}
-              </option>
+              <option key={p.id} value={p.id}>{optionLabel(p)}</option>
             ))}
           </select>
         </label>
@@ -285,9 +275,7 @@ const RideForm: React.FC<RideFormProps> = (props) => {
           >
             <option value="">Select pickup</option>
             {pickups.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
+              <option key={p.id} value={p.id}>{p.name}</option>
             ))}
           </select>
         </label>
@@ -303,11 +291,7 @@ const RideForm: React.FC<RideFormProps> = (props) => {
       </div>
 
       <div className="mt-4 flex gap-3 justify-end">
-        <button
-          type="button"
-          className="px-4 py-2 rounded border"
-          onClick={() => props.onCancel?.()}
-        >
+        <button type="button" className="px-4 py-2 rounded border" onClick={() => props.onCancel?.()}>
           Cancel
         </button>
         <button
