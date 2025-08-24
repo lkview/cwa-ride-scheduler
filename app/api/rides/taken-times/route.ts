@@ -1,44 +1,26 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createClient } from "@supabase/supabase-js";
+import { getServerSupabase } from "@/app/lib/supabaseServer";
 
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
-async function getAccessTokenFromCookie(): Promise<string | undefined> {
-  const cookieStore = await cookies();
-  return cookieStore.get("sb-access-token")?.value || cookieStore.get("supabase-auth-token")?.value;
-}
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const date = searchParams.get("date");
 
-async function getSupabaseClientStrict(tokenFromHeader?: string | null) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  if (!date) {
+    return NextResponse.json({ error: "Missing ?date=YYYY-MM-DD" }, { status: 400 });
+  }
 
-  const token = tokenFromHeader || (await getAccessTokenFromCookie());
-  if (!token) return null;
-  return createClient(url, anon, {
-    auth: { persistSession: false, detectSessionInUrl: false, autoRefreshToken: false },
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
-}
-
-export async function GET(req: Request) {
-  const url = new URL(req.url);
-  const date = url.searchParams.get("date");
-  if (!date) return NextResponse.json({ rows: [] });
-
-  const authHeader = req.headers.get("authorization");
-  const tokenFromHeader = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-  const supabase = await getSupabaseClientStrict(tokenFromHeader);
-  if (!supabase) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
+  const supabase = await getServerSupabase();
   const { data, error } = await supabase
     .from("ride_events")
     .select("meeting_time")
     .eq("date", date);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 400 });
+  }
 
-  const rows = (data ?? []).map((r: any) => r.meeting_time);
-  return NextResponse.json({ rows });
+  const times = (data || []).map((r: any) => r.meeting_time);
+  return NextResponse.json({ times });
 }

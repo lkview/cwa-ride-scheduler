@@ -1,76 +1,48 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createClient } from "@supabase/supabase-js";
+import { getServerSupabase } from "@/app/lib/supabaseServer";
+import { toDbStatus } from "@/app/lib/statusMap";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
-async function getAccessTokenFromCookie(): Promise<string | undefined> {
-  const cookieStore = await cookies();
-  return cookieStore.get("sb-access-token")?.value || cookieStore.get("supabase-auth-token")?.value;
-}
-
-async function getSupabaseClientStrict(tokenFromHeader?: string | null) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-  const token = tokenFromHeader || (await getAccessTokenFromCookie());
-  if (!token) return null;
-  return createClient(url, anon, {
-    auth: { persistSession: false, detectSessionInUrl: false, autoRefreshToken: false },
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
-}
-
-function uiToDbStatus(ui: string) {
-  const s = (ui || '').toLowerCase();
-  if (s === 'scheduled') return 'Tentative';
-  if (s === 'cancelled') return 'Canceled';
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-export async function POST(req: Request) {
-  const authHeader = req.headers.get("authorization");
-  const tokenFromHeader = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-
-  const supabase = await getSupabaseClientStrict(tokenFromHeader);
-  if (!supabase) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const body = await req.json().catch(() => null);
-  const ride_date: string | null = body?.ride_date ?? null;
-  const ride_time: string | null = body?.ride_time ?? null;
-  const notes: string | null = body?.notes ?? null;
-  const pilot_id: string | null = body?.pilot_id ?? null;
-  const passenger1_id: string | null = body?.passenger1_id ?? null;
-  const passenger2_id: string | null = body?.passenger2_id ?? null;
-  const emergency_contact_id: string | null = body?.emergency_contact_id ?? null;
-  const pickup_location_id: string | null = body?.pickup_location_id ?? null;
-  const status: string | null = body?.status ?? null;
-
-  if (!ride_date || !ride_time || !pilot_id || !passenger1_id || !emergency_contact_id || !status || !pickup_location_id) {
-    return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+export async function POST(request: Request) {
+  const body = await request.json().catch(() => ({}));
+  const required = ["date", "ride_time", "pickup_location_id", "emergency_contact_id", "pilot_id", "passenger1_id"];
+  for (const f of required) {
+    if (!body[f]) {
+      return NextResponse.json({ error: `Missing ${f}` }, { status: 400 });
+    }
   }
 
-  // 1) Try exact function for the provided schema
-  const rExact = await supabase.rpc("rides_create_exact", {
-    p_date: ride_date, p_meeting_time: ride_time, p_pickup_location_id: pickup_location_id,
-    p_pilot_id: pilot_id, p_passenger1_id: passenger1_id, p_passenger2_id: passenger2_id,
-    p_emergency_contact_id: emergency_contact_id, p_status: uiToDbStatus(status), p_notes: notes
-  });
+  if (body.passenger1_id && body.passenger1_id === body.pilot_id) {
+    return NextResponse.json({ error: "Pilot and Passenger 1 must be different people." }, { status: 400 });
+  }
+  if (body.passenger2_id && (body.passenger2_id === body.pilot_id || body.passenger2_id === body.passenger1_id)) {
+    return NextResponse.json({ error: "Passenger 2 must be different from Pilot and Passenger 1." }, { status: 400 });
+  }
 
-  let data = rExact.data, error = rExact.error;
+  const supabase = await getServerSupabase();
+  const statusDb = toDbStatus(body.status || "Draft");
 
-  // 2) Fallbacks if exact isn't there
+  const insert = {
+    date: body.date,
+    meeting_time: body.ride_time,
+    pickup_location_id: body.pickup_location_id,
+    emergency_contact_id: body.emergency_contact_id,
+    pilot_id: body.pilot_id,
+    passenger1_id: body.passenger1_id,
+    passenger2_id: body.passenger2_id || null,
+    pre_ride_notes: body.pre_ride_notes || null,
+    post_ride_notes: body.post_ride_notes || null,
+    status: statusDb,
+  };
+
+  const { data, error } = await supabase
+    .from("ride_events")
+    .insert(insert)
+    .select("id")
+    .single();
+
   if (error) {
-    const ride_ts_iso = new Date(`${ride_date}T${ride_time}:00`).toISOString();
-    const r2 = await supabase.rpc("rides_create_universal", {
-      p_ride_ts: ride_ts_iso, p_pilot_id: pilot_id, p_passenger1_id: passenger1_id,
-      p_passenger2_id: passenger2_id, p_emergency_contact_id: emergency_contact_id,
-      p_status: uiToDbStatus(status), p_title: null, p_notes: notes
-    });
-    if (!r2.error) { data = r2.data; error = null; }
+    return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  return NextResponse.json({ id: data });
+  return NextResponse.json({ id: data.id, ok: true }, { status: 201 });
 }

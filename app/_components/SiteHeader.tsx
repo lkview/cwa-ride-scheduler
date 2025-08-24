@@ -1,12 +1,31 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
 export default function SiteHeader() {
   const pathname = usePathname();
-  const supabase = useMemo(() => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!), []);
+  const supabase = useMemo(
+    () => createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    ),
+    []
+  );
+  const [showJson, setShowJson] = useState(false);
+
+  useEffect(() => {
+    let ignore = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/can-export', { cache: 'no-store' });
+        if (!ignore) setShowJson(res.ok);
+      } catch {/* ignore */}
+    })();
+    return () => { ignore = true; };
+  }, []);
+
   const linkClass = (href: string) =>
     `px-3 py-2 rounded-md text-sm font-medium ${pathname === href ? 'bg-black text-white' : 'text-black hover:bg-zinc-100'}`;
 
@@ -24,6 +43,7 @@ export default function SiteHeader() {
             <Link href="/" className={linkClass('/')}>Home</Link>
             <Link href="/admin/people" className={linkClass('/admin/people')}>People</Link>
             <Link href="/admin/pickups" className={linkClass('/admin/pickups')}>Pickup Locations</Link>
+            {showJson && <Link href="/admin/json" className={linkClass('/admin/json')}>JSON</Link>}
           </nav>
         </div>
         <div className="flex items-center gap-2">

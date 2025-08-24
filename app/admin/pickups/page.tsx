@@ -1,42 +1,41 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-type PickupRow = { id: string; name: string; address: string; notes: string | null };
+import { useEffect, useState } from 'react';
 
-function useSupabase(): SupabaseClient {
-  return useMemo(() => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!), []);
-}
+type Pickup = {
+  id: string;
+  name: string;
+  address: string;
+  notes: string | null;
+  lat: number | null;
+  lng: number | null;
+  created_at: string;
+  updated_at: string;
+};
 
-async function authHeaders(supabase: SupabaseClient): Promise<HeadersInit | undefined> {
-  const { data: { session } } = await supabase.auth.getSession();
-  return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : undefined;
-}
-
-export default function PickupsPage() {
-  const supabase = useSupabase();
-  const [rows, setRows] = useState<PickupRow[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function AdminPickupsPage() {
+  const [pickups, setPickups] = useState<Pickup[]>([]);
+  const [schemaUsed, setSchemaUsed] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const [show, setShow] = useState(false);
-  const [editId, setEditId] = useState<string | null>(null);
-  const [name, setName] = useState('');
-  const [address, setAddress] = useState('');
-  const [notes, setNotes] = useState('');
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<Pickup | null>(null);
+  const [form, setForm] = useState({ name: '', address: '', notes: '' });
   const [saving, setSaving] = useState(false);
-  const [saveErr, setSaveErr] = useState<string | null>(null);
+  const [formErr, setFormErr] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
     setError(null);
     try {
-      const headers = await authHeaders(supabase);
-      const res = await fetch('/api/pickups/list', { cache: 'no-store', headers });
-      const j = await res.json();
-      setRows(j.rows ?? []);
-    } catch (e:any) {
-      setError(e.message ?? 'Failed to load');
+      const res = await fetch('/api/pickups/list', { cache: 'no-store' });
+      const json = await res.json();
+      setPickups(json?.pickups || []);
+      setSchemaUsed(json?.schemaUsed || '');
+      if (json?.error) setError(json.error);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to load');
     } finally {
       setLoading(false);
     }
@@ -44,119 +43,136 @@ export default function PickupsPage() {
 
   useEffect(() => { load(); }, []);
 
-  function openNew() { setEditId(null); setName(''); setAddress(''); setNotes(''); setShow(true); setSaveErr(null); }
-  function openEdit(row: PickupRow) { setEditId(row.id); setName(row.name); setAddress(row.address); setNotes(row.notes || ''); setShow(true); setSaveErr(null); }
+  function openNew() {
+    setEditing(null);
+    setForm({ name: '', address: '', notes: '' });
+    setFormErr(null);
+    setModalOpen(true);
+  }
+
+  function openEdit(p: Pickup) {
+    setEditing(p);
+    setForm({ name: p.name || '', address: p.address || '', notes: p.notes || '' });
+    setFormErr(null);
+    setModalOpen(true);
+  }
 
   async function onSave() {
-    setSaveErr(null);
-    if (!name.trim()) { setSaveErr('Name is required.'); return; }
-    if (!address.trim()) { setSaveErr('Address is required.'); return; }
     setSaving(true);
+    setFormErr(null);
     try {
-      const headers = await authHeaders(supabase);
-      const path = editId ? '/api/pickups/update' : '/api/pickups/create';
-      const body: any = { name: name.trim(), address: address.trim(), notes: notes.trim() || null };
-      if (editId) body.id = editId;
-      const res = await fetch(path, {
+      const url = editing ? '/api/pickups/update' : '/api/pickups/create';
+      const body = editing
+        ? { id: editing.id, name: form.name, address: form.address, notes: form.notes || null }
+        : { name: form.name, address: form.address, notes: form.notes || null };
+      const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(headers ?? {}) },
-        body: JSON.stringify(body)
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
       });
+      const json = await res.json().catch(() => ({} as any));
       if (!res.ok) {
-        const j = await res.json().catch(()=>({}));
-        throw new Error(j.error || 'Save failed');
+        setFormErr(json?.error || 'Save failed');
+      } else {
+        setModalOpen(false);
+        await load();
       }
-      setShow(false);
-      await load();
-    } catch (e:any) {
-      setSaveErr(e.message ?? 'Save failed');
+    } catch (e: any) {
+      setFormErr(e?.message || 'Save failed');
     } finally {
       setSaving(false);
     }
   }
 
-  async function onDelete(row: PickupRow) {
-    if (!confirm(`Delete pickup location "${row.name}"?`)) return;
-    const headers = await authHeaders(supabase);
-    const res = await fetch('/api/pickups/delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(headers ?? {}) },
-      body: JSON.stringify({ id: row.id })
-    });
-    if (!res.ok) {
-      const j = await res.json().catch(()=>({}));
-      alert(j.error || 'Delete failed');
-    } else {
-      await load();
+  async function onDelete(p: Pickup) {
+    if (!confirm(`Delete "${p.name}"?`)) return;
+    try {
+      const res = await fetch('/api/pickups/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: p.id }),
+      });
+      const json = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        alert(json?.error || 'Delete failed');
+      } else {
+        await load();
+      }
+    } catch (e: any) {
+      alert(e?.message || 'Delete failed');
     }
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Pickup Locations</h1>
-        <button onClick={openNew} className="px-4 py-2 rounded-md bg-black text-white hover:bg-zinc-800">New pickup</button>
+    <div style={{ maxWidth: 1000, margin: '2rem auto', fontFamily: 'system-ui, sans-serif' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h1 style={{ margin: 0 }}>Pickup Locations</h1>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <a href="/admin/pickups-debug" style={{ padding: '0.6rem 1rem', borderRadius: 8, border: '1px solid #ccc', textDecoration: 'none' }}>Open Debug View</a>
+          <button onClick={openNew} style={{ padding: '0.6rem 1rem', background: 'black', color: 'white', borderRadius: 8 }}>New pickup</button>
+        </div>
       </div>
 
-      {loading ? <div>Loading…</div> : error ? <div className="text-red-600">{error}</div> : (
-        <div className="border rounded-md overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-zinc-50">
-              <tr className="text-left">
-                <th className="p-3">Name</th>
-                <th className="p-3">Address</th>
-                <th className="p-3">Notes</th>
-                <th className="p-3 w-40">Actions</th>
+      <div style={{ marginTop: 8, background: '#fff8e1', border: '1px solid #ffe082', borderRadius: 8, padding: 10 }}>
+        <b>Debug:</b> schemaUsed = <code>{schemaUsed || '(unknown)'}</code>, count = <b>{pickups.length}</b>
+        {error && (<span style={{ color: 'crimson' }}>&nbsp; error: {error}</span>)}
+      </div>
+
+      {loading ? (
+        <p>Loading…</p>
+      ) : (
+        <div style={{ marginTop: '1rem', border: '1px solid #ddd', borderRadius: 8, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead style={{ background: '#fafafa' }}>
+              <tr>
+                <th style={th}>Name</th>
+                <th style={th}>Address</th>
+                <th style={th}>Notes</th>
+                <th style={th}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 ? (
-                <tr><td className="p-3 text-zinc-600" colSpan={4}>No pickup locations.</td></tr>
-              ) : rows.map(r => (
-                <tr key={r.id} className="border-t">
-                  <td className="p-3">{r.name}</td>
-                  <td className="p-3">{r.address}</td>
-                  <td className="p-3">{r.notes}</td>
-                  <td className="p-3">
-                    <div className="flex gap-2">
-                      <button onClick={() => openEdit(r)} className="px-2 py-1 rounded border border-zinc-300 hover:bg-zinc-100 text-sm">Edit</button>
-                      <button onClick={() => onDelete(r)} className="px-2 py-1 rounded border border-red-300 text-red-700 hover:bg-red-50 text-sm">Delete</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {pickups.length === 0 ? (
+                <tr><td colSpan={4} style={{ padding: '1rem', textAlign: 'center', color: '#666' }}>No pickup locations.</td></tr>
+              ) : (
+                pickups.map(p => (
+                  <tr key={p.id} style={{ borderTop: '1px solid #eee' }}>
+                    <td style={td}>{p.name}</td>
+                    <td style={td}>{p.address}</td>
+                    <td style={td}>{p.notes || ''}</td>
+                    <td style={td}>
+                      <button onClick={() => openEdit(p)} style={btn}>Edit</button>
+                      <button onClick={() => onDelete(p)} style={{ ...btn, marginLeft: 8, background: '#eee' }}>Delete</button>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
       )}
 
-      {show && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center px-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-xl">
-            <div className="p-5 border-b flex items-center justify-between">
-              <h3 className="text-lg font-semibold">{editId ? 'Edit pickup' : 'New pickup'}</h3>
-              <button onClick={() => setShow(false)} className="text-zinc-500 hover:text-black">✕</button>
+      {modalOpen && (
+        <div style={modalBackdrop}>
+          <div style={modalCard}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0 }}>{editing ? 'Edit pickup' : 'New pickup'}</h3>
+              <button onClick={() => setModalOpen(false)} style={{ fontSize: 20, lineHeight: 1, background: 'transparent', border: 'none' }}>×</button>
             </div>
-            <div className="p-5 space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">Name</label>
-                <input value={name} onChange={e=>setName(e.target.value)} className="w-full rounded-md border p-2" placeholder="e.g., Jamie's Place – Winthrop"/>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Address</label>
-                <input value={address} onChange={e=>setAddress(e.target.value)} className="w-full rounded-md border p-2" placeholder="Street, City, State"/>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Notes (optional)</label>
-                <textarea rows={3} value={notes} onChange={e=>setNotes(e.target.value)} className="w-full rounded-md border p-2" />
-              </div>
-              {saveErr && <div className="text-red-600">{saveErr}</div>}
+
+            <div style={{ marginTop: 16 }}>
+              <label style={label}>Name</label>
+              <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} style={input} />
+              <label style={label}>Address</label>
+              <input value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} style={input} />
+              <label style={label}>Notes (optional)</label>
+              <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} style={{ ...input, minHeight: 90 }} />
+              {formErr && <div style={{ color: 'crimson', marginTop: 8 }}>{formErr}</div>}
             </div>
-            <div className="p-5 border-t flex items-center justify-end gap-2">
-              <button onClick={() => setShow(false)} className="px-3 py-2 rounded-md border border-zinc-300 hover:bg-zinc-100">Cancel</button>
-              <button onClick={onSave} disabled={saving} className="px-4 py-2 rounded-md bg-black text-white hover:bg-zinc-800 disabled:opacity-50">
-                {saving ? 'Saving…' : 'Save'}
-              </button>
+
+            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button onClick={() => setModalOpen(false)} style={{ ...btn, background: '#eee' }}>Cancel</button>
+              <button onClick={onSave} disabled={saving} style={{ ...btn, background: 'black', color: 'white' }}>{saving ? 'Saving…' : 'Save'}</button>
             </div>
           </div>
         </div>
@@ -164,3 +180,17 @@ export default function PickupsPage() {
     </div>
   );
 }
+
+const th: React.CSSProperties = { textAlign: 'left', padding: '0.8rem', fontWeight: 600, fontSize: 14, color: '#333' };
+const td: React.CSSProperties = { padding: '0.8rem', fontSize: 14 };
+const btn: React.CSSProperties = { padding: '0.4rem 0.7rem', borderRadius: 6, border: '1px solid #ccc', background: 'white' };
+const label: React.CSSProperties = { display: 'block', fontSize: 13, color: '#333', marginTop: 8, marginBottom: 4 };
+const input: React.CSSProperties = { width: '100%', padding: '0.6rem', borderRadius: 6, border: '1px solid #ccc', fontSize: 14 };
+
+const modalBackdrop: React.CSSProperties = {
+  position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
+};
+const modalCard: React.CSSProperties = {
+  background: 'white', borderRadius: 12, padding: 16, minWidth: 420, maxWidth: 600, boxShadow: '0 10px 30px rgba(0,0,0,0.2)'
+};

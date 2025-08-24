@@ -1,52 +1,45 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createClient } from "@supabase/supabase-js";
+import { getServerSupabase } from "@/app/lib/supabaseServer";
 
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
-function isPreview() {
-  return process.env.NEXT_PUBLIC_ENV === "preview" || process.env.VERCEL_ENV === "preview";
-}
+export async function GET() {
+  const supabase = await getServerSupabase();
+  const today = new Date();
+  const past = new Date(today);
+  past.setDate(past.getDate() - 30);
+  const pastISO = past.toISOString().slice(0, 10);
 
-async function getAccessTokenFromCookie(): Promise<string | undefined> {
-  const cookieStore = await cookies();
-  return cookieStore.get("sb-access-token")?.value || cookieStore.get("supabase-auth-token")?.value;
-}
+  const { data, error } = await supabase
+    .from("ride_events")
+    .select(`
+      id, date, meeting_time, status, start_at,
+      pickup:pickup_locations ( id, name, address ),
+      pilot:people!ride_events_pilot_id_fkey ( id, first_name, last_name ),
+      emergency:people!ride_events_emergency_contact_id_fkey ( id, first_name, last_name ),
+      p1:people!ride_events_passenger1_id_fkey ( id, first_name, last_name ),
+      p2:people!ride_events_passenger2_id_fkey ( id, first_name, last_name )
+    `)
+    .gte("date", pastISO)
+    .order("date", { ascending: true })
+    .order("meeting_time", { ascending: true });
 
-async function getSupabaseClient(tokenFromHeader?: string | null) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  const token = tokenFromHeader || (await getAccessTokenFromCookie());
-  if (token) {
-    return createClient(url, anon, {
-      auth: { persistSession: false, detectSessionInUrl: false, autoRefreshToken: false },
-      global: { headers: { Authorization: `Bearer ${token}` } },
-    });
-  }
-  if (serviceKey && isPreview()) {
-    return createClient(url, serviceKey, { auth: { persistSession: false } });
-  }
-  return null;
-}
-
-export async function GET(req: Request) {
-  const authHeader = req.headers.get("authorization");
-  const tokenFromHeader = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-  const supabase = await getSupabaseClient(tokenFromHeader);
-  if (!supabase) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  let { data, error } = await supabase.rpc("rides_list_universal");
   if (error) {
-    const r2 = await supabase.rpc("rides_list_full");
-    if (!r2.error) { data = r2.data; error = null; }
-    else {
-      const r3 = await supabase.rpc("rides_list_simple");
-      data = r3.data; error = r3.error;
-    }
+    return NextResponse.json({ error: error.message }, { status: 400 });
   }
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ rows: data ?? [] });
+
+  const shaped = (data || []).map((r: any) => ({
+    id: r.id,
+    date: r.date,
+    meeting_time: r.meeting_time,
+    status: r.status,
+    start_at: r.start_at,
+    pickup: r.pickup ? { id: r.pickup.id, name: r.pickup.name, address: r.pickup.address } : null,
+    pilot_name: r.pilot ? `${r.pilot.first_name ?? ""} ${r.pilot.last_name ?? ""}`.trim() : null,
+    emergency_name: r.emergency ? `${r.emergency.first_name ?? ""} ${r.emergency.last_name ?? ""}`.trim() : null,
+    passenger1_name: r.p1 ? `${r.p1.first_name ?? ""} ${r.p1.last_name ?? ""}`.trim() : null,
+    passenger2_name: r.p2 ? `${r.p2.first_name ?? ""} ${r.p2.last_name ?? ""}`.trim() : null,
+  }));
+
+  return NextResponse.json({ rides: shaped });
 }
