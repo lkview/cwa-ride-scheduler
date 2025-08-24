@@ -1,23 +1,18 @@
-// Type-only shim so files that import `{ RideEvent }` from the RideForm module compile.
-// This does NOT change runtime behavior. It just provides a named type export.
+// Type shim so TS accepts `import RideForm, { RideEvent } from "../../../../components/RideForm"`
+// No runtime impact. Safe to keep in repo.
 //
-// It matches any import that ends with "components/RideForm".
-declare module "*components/RideForm" {
-  // A loose shape for a ride event row. Adjust if you later want stricter typing.
-  export type RideEvent = {
-    id: string;
-    date?: string | null;
-    time?: string | null;
-    status?: string | null;
-    pilot_id?: string | null;
-    passenger1_id?: string | null;
-    passenger2_id?: string | null;
-    emergency_contact_id?: string | null;
-    pickup_location_id?: string | null;
-    notes?: string | null;
-    [key: string]: any;
-  };
+// Why this file?
+// Your page file imports a *named type* `RideEvent` from the RideForm component file,
+// but that component only has a default export. This declaration file tells TypeScript
+// that such a named type exists for that specific relative path.
 
-  const RideForm: any; // keep existing default export working
+declare module "../../../../components/RideForm" {
+  import type { FC } from "react";
+  // Default export: the RideForm component (typed loosely here)
+  const RideForm: FC<any>;
   export default RideForm;
+
+  // Named type export used only for typing in a page.
+  // You can refine this later if you want stronger types.
+  export type RideEvent = any;
 }
