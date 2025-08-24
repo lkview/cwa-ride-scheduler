@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 
-/** Named type export so pages can `import { RideEvent } from "components/RideForm"`. */
+/** Public type so pages can import { RideEvent } from "components/RideForm" */
 export type RideEvent = {
   id?: string;
   date?: string | null;
@@ -38,8 +38,31 @@ type RideFormProps = {
   initial?: Partial<RideEvent>;
 };
 
+// -------- helpers
+
 function optionLabel(o?: PersonOption | null) {
   return o?.display_name ?? "";
+}
+
+// Accepts any object-ish record and guarantees {id, display_name}
+function normalizePerson(x: any): PersonOption | null {
+  if (!x) return null;
+  const id =
+    x.id ?? x.person_id ?? x.user_id ?? x.profile_id ?? null;
+  if (!id) return null;
+  const display =
+    x.display_name ??
+    x.name ??
+    [x.first_name, x.last_name].filter(Boolean).join(" ").trim() ??
+    String(id);
+  return { id: String(id), display_name: String(display), email: x.email, phone: x.phone };
+}
+function normalizePickup(x: any): PickupOption | null {
+  if (!x) return null;
+  const id = x.id ?? null;
+  if (!id) return null;
+  const name = x.name ?? x.display_name ?? x.address ?? String(id);
+  return { id: String(id), name: String(name), address: x.address ?? null, notes: x.notes ?? null };
 }
 
 function filtered<T extends { id: string }>(
@@ -50,6 +73,8 @@ function filtered<T extends { id: string }>(
   const keep = keepId ?? null;
   return list.filter((o) => o.id === keep || !excludeIds.includes(o.id));
 }
+
+// -------- component
 
 const RideForm: React.FC<RideFormProps> = (props) => {
   const init = props.initial ?? {};
@@ -76,33 +101,39 @@ const RideForm: React.FC<RideFormProps> = (props) => {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  // Load option lists from our API routes
   useEffect(() => {
     let alive = true;
     async function load() {
       try {
         setLoading(true);
-        const [p1, p2] = await Promise.all([
-          fetch("/api/pickers/list", { cache: "no-store" }).then((r) => r.json()),
-          fetch("/api/pickups/list", { cache: "no-store" }).then((r) => r.json()),
+        const base = typeof window !== "undefined" ? window.location.origin : "";
+        const [a, b] = await Promise.all([
+          fetch(`${base}/api/pickers/list`, { cache: "no-store" }),
+          fetch(`${base}/api/pickups/list`, { cache: "no-store" }),
         ]);
+
+        if (!a.ok) throw new Error(`pickers: ${a.status}`);
+        if (!b.ok) throw new Error(`pickups: ${b.status}`);
+
+        const pj = await a.json();
+        const uj = await b.json();
+
         if (!alive) return;
 
-        // Minimal shape-guarding in case something changes server-side
-        const safe: PickersPayload = {
-          pilots: Array.isArray(p1?.pilots) ? p1.pilots : [],
-          passengers: Array.isArray(p1?.passengers) ? p1.passengers : [],
-          emergencyContacts: Array.isArray(p1?.emergencyContacts) ? p1.emergencyContacts : [],
-        };
-        setPickers(safe);
-        setPickups((Array.isArray(p2?.pickups) ? p2.pickups : []) as PickupOption[]);
-        setErr(null);
+        const pilots = (pj?.pilots ?? []).map(normalizePerson).filter(Boolean) as PersonOption[];
+        const passengers = (pj?.passengers ?? []).map(normalizePerson).filter(Boolean) as PersonOption[];
+        const emergencyContacts = (pj?.emergencyContacts ?? []).map(normalizePerson).filter(Boolean) as PersonOption[];
 
-        // Debug: log once so we can confirm what the form is actually using
-        console.log("[RideForm] pickers payload:", safe);
+        const pickupsN = (uj?.pickups ?? []).map(normalizePickup).filter(Boolean) as PickupOption[];
+
+        setPickers({ pilots, passengers, emergencyContacts });
+        setPickups(pickupsN);
+        setErr(null);
       } catch (e: any) {
-        console.error("Failed loading pickers:", e);
+        console.error("Failed loading pickers/pickups:", e);
         setErr(e?.message ?? "Failed loading options");
+        setPickers({ pilots: [], passengers: [], emergencyContacts: [] });
+        setPickups([]);
       } finally {
         if (alive) setLoading(false);
       }
@@ -111,9 +142,8 @@ const RideForm: React.FC<RideFormProps> = (props) => {
     return () => { alive = false; };
   }, []);
 
-  // Prevent choosing the same person twice
+  // Prevent choosing same person twice
   const selectedIds = [pilotId, p1Id, p2Id, ecId].filter(Boolean) as string[];
-
   const pilotOpts = useMemo(
     () => filtered(pickers.pilots, selectedIds.filter((id) => id !== pilotId), pilotId),
     [pickers.pilots, selectedIds, pilotId]
@@ -155,62 +185,47 @@ const RideForm: React.FC<RideFormProps> = (props) => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
       }).catch(() => null);
-
       if (resp && resp.ok) {
         const j = await resp.json().catch(() => ({}));
         props.onSaved?.(j?.id ?? props.rideId);
       } else {
         props.onSaved?.(props.rideId);
       }
-    } catch (e) {
-      console.error(e);
+    } catch {
       props.onSaved?.(props.rideId);
     }
   }
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      {/* Visible debug so we can confirm this file is actually being used */}
-      <div className="px-3 py-2 text-sm rounded bg-yellow-50 text-yellow-800">
-        <strong>Debug:</strong> pilots={pickers.pilots.length} • ec={pickers.emergencyContacts.length} • passengers={pickers.passengers.length}
+      {/* tiny inline debug so we can see what the form received */}
+      <div className="text-xs text-gray-500">
+        Debug: pilots {pickers.pilots.length} · passengers {pickers.passengers.length} · contacts {pickers.emergencyContacts.length} · pickups {pickups.length}
       </div>
 
       {err && (
-        <div className="rounded bg-red-50 text-red-700 px-3 py-2 text-sm">{err}</div>
+        <div className="rounded bg-red-50 text-red-700 px-3 py-2 text-sm">
+          {err}
+        </div>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <label className="flex flex-col gap-1">
           <span className="text-sm font-medium">Date</span>
-          <input
-            type="date"
-            className="border rounded px-3 py-2"
-            value={date ?? ""}
-            onChange={(e) => setDate(e.target.value)}
-            required
-          />
+          <input type="date" className="border rounded px-3 py-2"
+            value={date ?? ""} onChange={(e) => setDate(e.target.value)} required />
         </label>
 
         <label className="flex flex-col gap-1">
           <span className="text-sm font-medium">Time</span>
-          <input
-            type="time"
-            className="border rounded px-3 py-2"
-            value={time ?? ""}
-            onChange={(e) => setTime(e.target.value)}
-            required
-          />
+          <input type="time" className="border rounded px-3 py-2"
+            value={time ?? ""} onChange={(e) => setTime(e.target.value)} required />
         </label>
 
         <label className="flex flex-col gap-1">
           <span className="text-sm font-medium">Pilot</span>
-          <select
-            className="border rounded px-3 py-2"
-            value={pilotId}
-            onChange={(e) => setPilotId(e.target.value)}
-            disabled={loading}
-            required
-          >
+          <select className="border rounded px-3 py-2"
+            value={pilotId} onChange={(e) => setPilotId(e.target.value)} disabled={loading} required>
             <option value="">Select a pilot</option>
             {pilotOpts.map((p) => (
               <option key={p.id} value={p.id}>{optionLabel(p)}</option>
@@ -220,13 +235,8 @@ const RideForm: React.FC<RideFormProps> = (props) => {
 
         <label className="flex flex-col gap-1">
           <span className="text-sm font-medium">Emergency Contact</span>
-          <select
-            className="border rounded px-3 py-2"
-            value={ecId}
-            onChange={(e) => setEcId(e.target.value)}
-            disabled={loading}
-            required
-          >
+          <select className="border rounded px-3 py-2"
+            value={ecId} onChange={(e) => setEcId(e.target.value)} disabled={loading} required>
             <option value="">Select emergency contact</option>
             {ecOpts.map((p) => (
               <option key={p.id} value={p.id}>{optionLabel(p)}</option>
@@ -236,13 +246,8 @@ const RideForm: React.FC<RideFormProps> = (props) => {
 
         <label className="flex flex-col gap-1 md:col-span-2">
           <span className="text-sm font-medium">Passenger 1</span>
-          <select
-            className="border rounded px-3 py-2"
-            value={p1Id}
-            onChange={(e) => setP1Id(e.target.value)}
-            disabled={loading}
-            required
-          >
+          <select className="border rounded px-3 py-2"
+            value={p1Id} onChange={(e) => setP1Id(e.target.value)} disabled={loading} required>
             <option value="">Select passenger</option>
             {p1Opts.map((p) => (
               <option key={p.id} value={p.id}>{optionLabel(p)}</option>
@@ -252,12 +257,8 @@ const RideForm: React.FC<RideFormProps> = (props) => {
 
         <label className="flex flex-col gap-1 md:col-span-2">
           <span className="text-sm font-medium">Passenger 2 (optional)</span>
-          <select
-            className="border rounded px-3 py-2"
-            value={p2Id}
-            onChange={(e) => setP2Id(e.target.value)}
-            disabled={loading}
-          >
+          <select className="border rounded px-3 py-2"
+            value={p2Id} onChange={(e) => setP2Id(e.target.value)} disabled={loading}>
             <option value="">— None —</option>
             {p2Opts.map((p) => (
               <option key={p.id} value={p.id}>{optionLabel(p)}</option>
@@ -267,12 +268,8 @@ const RideForm: React.FC<RideFormProps> = (props) => {
 
         <label className="flex flex-col gap-1 md:col-span-2">
           <span className="text-sm font-medium">Pickup location</span>
-          <select
-            className="border rounded px-3 py-2"
-            value={pickupId}
-            onChange={(e) => setPickupId(e.target.value)}
-            disabled={loading}
-          >
+          <select className="border rounded px-3 py-2"
+            value={pickupId} onChange={(e) => setPickupId(e.target.value)} disabled={loading}>
             <option value="">Select pickup</option>
             {pickups.map((p) => (
               <option key={p.id} value={p.id}>{p.name}</option>
@@ -282,11 +279,8 @@ const RideForm: React.FC<RideFormProps> = (props) => {
 
         <label className="flex flex-col gap-1 md:col-span-2">
           <span className="text-sm font-medium">Notes</span>
-          <textarea
-            className="border rounded px-3 py-2 min-h-[120px]"
-            value={notes ?? ""}
-            onChange={(e) => setNotes(e.target.value)}
-          />
+          <textarea className="border rounded px-3 py-2 min-h-[120px]"
+            value={notes ?? ""} onChange={(e) => setNotes(e.target.value)} />
         </label>
       </div>
 
@@ -294,11 +288,7 @@ const RideForm: React.FC<RideFormProps> = (props) => {
         <button type="button" className="px-4 py-2 rounded border" onClick={() => props.onCancel?.()}>
           Cancel
         </button>
-        <button
-          type="submit"
-          className="px-4 py-2 rounded bg-black text-white disabled:opacity-50"
-          disabled={loading}
-        >
+        <button type="submit" className="px-4 py-2 rounded bg-black text-white disabled:opacity-50" disabled={loading}>
           Save
         </button>
       </div>
