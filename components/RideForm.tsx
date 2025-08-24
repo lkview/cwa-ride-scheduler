@@ -1,42 +1,25 @@
+// components/RideForm.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
-/** Named type export so pages can `import { RideEvent } from "components/RideForm"`.
- *  Extended to include fields used by edit page (e.g., `locked`).
- */
 export type RideEvent = {
   id?: string;
   date?: string | null;
   time?: string | null;
-  status?: string | null;
+  status?: string | null; // expect lowercase in DB
   pilot_id?: string | null;
   passenger1_id?: string | null;
   passenger2_id?: string | null;
   emergency_contact_id?: string | null;
-  pickup_location_id?: string | null; // legacy pages may reference this
-  pickup_id?: string | null;          // form uses this internally
-  notes?: string | null;
-  locked?: boolean | null;
-  canceled_reason?: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
+  pickup_location_id?: string | null;
+  pre_ride_notes?: string | null;
+  post_ride_notes?: string | null;
 };
 
-/**
- * Drop-in RideForm that pulls picker options from server routes:
- *   - /api/pickers/list  -> { pilots[], passengers[], emergencyContacts[] }
- *   - /api/pickups/list  -> { pickups[] }
- *
- * It also prevents selecting the same person in multiple roles by
- * filtering options live across Pilot, Passenger 1/2 and Emergency Contact.
- *
- * NOTE: Save behaviour is preserved: if parent passes a handler it is used;
- * otherwise we POST to /api/rides/create as a fallback.
- */
-
-type PersonOption = { id: string; display_name: string; email?: string; phone?: string };
-type PickupOption = { id: string; name: string; address?: string | null; notes?: string | null };
+type PersonOption = { id: string; display_name: string };
+type PickupOption = { id: string; name: string; address?: string | null };
 
 type PickersPayload = {
   pilots: PersonOption[];
@@ -45,281 +28,209 @@ type PickersPayload = {
 };
 
 type RideFormProps = {
-  rideId?: string; // <-- added to satisfy edit page prop
+  rideId?: string;
+  initial?: Partial<RideEvent>;
   onCancel?: () => void;
   onSaved?: (rideId?: string) => void;
-  onSave?: (payload: any) => Promise<any> | any; // legacy compat
-  // allow passing initial values (all optional)
-  initial?: Partial<RideEvent>;
 };
 
-function optionLabel(o?: PersonOption | null) {
-  return o?.display_name ?? "";
-}
+const STATUS_OPTIONS = [
+  { label: "Tentative", value: "tentative" },
+  { label: "Confirmed", value: "confirmed" },
+  { label: "Completed", value: "completed" },
+  { label: "Canceled",  value: "canceled"  },
+];
 
-function filtered<T extends { id: string }>(
-  list: T[],
-  excludeIds: string[],
-  keepId?: string | null
-) {
-  const keep = keepId ?? null;
-  return list.filter((o) => o.id === keep || !excludeIds.includes(o.id));
+function buildTimes(): { value: string; label: string }[] {
+  const out: { value: string; label: string }[] = [];
+  const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+  for (let h = 7; h <= 20; h++) {
+    for (let m of [0, 30]) {
+      const value = `${pad(h)}:${pad(m)}:00`;
+      const dt = new Date();
+      dt.setHours(h, m, 0, 0);
+      const label = dt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      out.push({ value, label });
+    }
+  }
+  return out;
 }
+const TIME_OPTIONS = buildTimes();
 
-const RideForm: React.FC<RideFormProps> = (props) => {
+export default function RideForm(props: RideFormProps) {
+  const router = useRouter();
   const init = props.initial ?? {};
 
-  // Form state
-  const [date, setDate] = useState(init.date ?? "");
-  const [time, setTime] = useState(init.time ?? "");
+  const [date, setDate] = useState<string>(init.date ?? "");
+  const [time, setTime] = useState<string>(init.time ?? "");
+  const [status, setStatus] = useState<string>((init.status ?? "tentative").toString().toLowerCase());
   const [pilotId, setPilotId] = useState<string>(init.pilot_id ?? "");
   const [p1Id, setP1Id] = useState<string>(init.passenger1_id ?? "");
   const [p2Id, setP2Id] = useState<string>(init.passenger2_id ?? "");
   const [ecId, setEcId] = useState<string>(init.emergency_contact_id ?? "");
-  const [pickupId, setPickupId] = useState<string>((init.pickup_id ?? init.pickup_location_id) ?? "");
-  const [notes, setNotes] = useState<string>(init.notes ?? "");
+  const [pickupId, setPickupId] = useState<string>(init.pickup_location_id ?? "");
+  const [notes, setNotes] = useState<string>(init.pre_ride_notes ?? "");
 
-  // Options
-  const [pickers, setPickers] = useState<PickersPayload>({
-    pilots: [],
-    passengers: [],
-    emergencyContacts: [],
-  });
+  const [pickers, setPickers] = useState<PickersPayload>({ pilots: [], passengers: [], emergencyContacts: [] });
   const [pickups, setPickups] = useState<PickupOption[]>([]);
-  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let alive = true;
     async function load() {
       try {
-        setLoading(true);
-        const [p1, p2] = await Promise.all([
+        const [a, b] = await Promise.all([
           fetch("/api/pickers/list", { cache: "no-store" }).then((r) => r.json()),
           fetch("/api/pickups/list", { cache: "no-store" }).then((r) => r.json()),
         ]);
         if (!alive) return;
-        setPickers(p1 as PickersPayload);
-        setPickups((p2?.pickups ?? []) as PickupOption[]);
-        setErr(null);
+        setPickers(a);
+        setPickups(b?.pickups ?? []);
       } catch (e: any) {
-        console.error("Failed loading pickers:", e);
         setErr(e?.message ?? "Failed loading options");
-      } finally {
-        if (alive) setLoading(false);
       }
     }
     load();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, []);
 
-  // Prevent choosing same person twice (id-based)
-  const selectedIds = [pilotId, p1Id, p2Id, ecId].filter(Boolean) as string[];
+  // Autofill single-option dropdowns
+  useEffect(() => { if (!pilotId && pickers.pilots.length === 1) setPilotId(pickers.pilots[0].id); }, [pickers.pilots, pilotId]);
+  useEffect(() => { if (!ecId && pickers.emergencyContacts.length === 1) setEcId(pickers.emergencyContacts[0].id); }, [pickers.emergencyContacts, ecId]);
+  useEffect(() => { if (!p1Id && pickers.passengers.length === 1) setP1Id(pickers.passengers[0].id); }, [pickers.passengers, p1Id]);
+  useEffect(() => { if (!pickupId && pickups.length === 1) setPickupId(pickups[0].id); }, [pickups, pickupId]);
 
-  const pilotOpts = useMemo(
-    () => filtered(pickers.pilots, selectedIds.filter((id) => id !== pilotId), pilotId),
-    [pickers.pilots, selectedIds, pilotId]
-  );
-  const p1Opts = useMemo(
-    () => filtered(pickers.passengers, selectedIds.filter((id) => id !== p1Id), p1Id),
-    [pickers.passengers, selectedIds, p1Id]
-  );
-  const p2Opts = useMemo(
-    () => filtered(pickers.passengers, selectedIds.filter((id) => id !== p2Id), p2Id),
-    [pickers.passengers, selectedIds, p2Id]
-  );
-  const ecOpts = useMemo(
-    () => filtered(pickers.emergencyContacts, selectedIds.filter((id) => id !== ecId), ecId),
-    [pickers.emergencyContacts, selectedIds, ecId]
-  );
+  const selectedIds = [pilotId, p1Id, p2Id, ecId].filter(Boolean) as string[];
+  const filter = (list: PersonOption[], keep?: string) =>
+    list.filter((o) => o.id === keep || !selectedIds.includes(o.id));
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     const payload = {
       date,
-      time,
-      pilot_id: pilotId || null,
-      passenger1_id: p1Id || null,
+      ride_time: time,
+      status, // lowercase for DB
+      pickup_location_id: pickupId,
+      emergency_contact_id: ecId,
+      pilot_id: pilotId,
+      passenger1_id: p1Id,
       passenger2_id: p2Id || null,
-      emergency_contact_id: ecId || null,
-      pickup_id: pickupId || null,
-      notes: notes || null,
+      pre_ride_notes: notes || null,
     };
-
+    setSaving(true);
     try {
-      if (typeof props.onSave === "function") {
-        await props.onSave(payload);
-        props.onSaved?.(props.rideId);
-        return;
-      }
-      // Fallback generic POST (no-op if endpoint doesn't exist)
-      const resp = await fetch("/api/rides/create", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      }).catch(() => null);
-      if (resp && resp.ok) {
+      if (props.rideId) {
+        const resp = await fetch(`/api/rides/${props.rideId}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        });
         const j = await resp.json().catch(() => ({}));
-        props.onSaved?.(j?.id ?? props.rideId);
-      } else {
-        // Even if POST isn't available, we still close to preserve UX
+        if (!resp.ok) throw new Error(j?.error || "Failed to update");
         props.onSaved?.(props.rideId);
+      } else {
+        const resp = await fetch("/api/rides/create", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const j = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(j?.error || "Failed to save");
+        props.onSaved?.(j?.id);
       }
-    } catch (e) {
-      console.error(e);
-      props.onSaved?.(props.rideId);
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to save");
+    } finally {
+      setSaving(false);
     }
+  }
+
+  function onCancelClick() {
+    if (props.onCancel) props.onCancel();
+    else router.back();
   }
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      {err && (
-        <div className="rounded bg-red-50 text-red-700 px-3 py-2 text-sm">
-          {err}
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {err && <div className="rounded bg-red-50 text-red-700 px-3 py-2 text-sm">{err}</div>}
+      <div className="grid md:grid-cols-3 gap-4">
         <label className="flex flex-col gap-1">
           <span className="text-sm font-medium">Date</span>
-          <input
-            type="date"
-            className="border rounded px-3 py-2"
-            value={date ?? ""}
-            onChange={(e) => setDate(e.target.value)}
-            required
-          />
+          <input type="date" className="border rounded px-3 py-2" value={date} onChange={(e) => setDate(e.target.value)} required />
         </label>
 
         <label className="flex flex-col gap-1">
-          <span className="text-sm font-medium">Time</span>
-          <input
-            type="time"
-            className="border rounded px-3 py-2"
-            value={time ?? ""}
-            onChange={(e) => setTime(e.target.value)}
-            required
-          />
-        </label>
-
-        <label className="flex flex-col gap-1">
-          <span className="text-sm font-medium">Pilot</span>
-          <select
-            className="border rounded px-3 py-2"
-            value={pilotId}
-            onChange={(e) => setPilotId(e.target.value)}
-            disabled={loading}
-            required
-          >
-            <option value="">Select a pilot</option>
-            {pilotOpts.map((p) => (
-              <option key={p.id} value={p.id}>
-                {optionLabel(p)}
-              </option>
-            ))}
+          <span className="text-sm font-medium">Meeting time</span>
+          <select className="border rounded px-3 py-2" value={time} onChange={(e) => setTime(e.target.value)} required>
+            <option value="">Select time…</option>
+            {TIME_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
           </select>
         </label>
 
         <label className="flex flex-col gap-1">
-          <span className="text-sm font-medium">Emergency Contact</span>
-          <select
-            className="border rounded px-3 py-2"
-            value={ecId}
-            onChange={(e) => setEcId(e.target.value)}
-            disabled={loading}
-            required
-          >
+          <span className="text-sm font-medium">Status</span>
+          <select className="border rounded px-3 py-2" value={status} onChange={(e) => setStatus(e.target.value)}>
+            {STATUS_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="text-sm font-medium">Pickup location</span>
+          <select className="border rounded px-3 py-2" value={pickupId} onChange={(e) => setPickupId(e.target.value)} required>
+            <option value="">Select a pickup</option>
+            {pickups.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="text-sm font-medium">Pilot</span>
+          <select className="border rounded px-3 py-2" value={pilotId} onChange={(e) => setPilotId(e.target.value)} required>
+            <option value="">Select a pilot</option>
+            {filter(pickers.pilots, pilotId).map((p) => (<option key={p.id} value={p.id}>{p.display_name}</option>))}
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="text-sm font-medium">Emergency contact</span>
+          <select className="border rounded px-3 py-2" value={ecId} onChange={(e) => setEcId(e.target.value)} required>
             <option value="">Select emergency contact</option>
-            {ecOpts.map((p) => (
-              <option key={p.id} value={p.id}>
-                {optionLabel(p)}
-              </option>
-            ))}
+            {filter(pickers.emergencyContacts, ecId).map((p) => (<option key={p.id} value={p.id}>{p.display_name}</option>))}
           </select>
         </label>
 
         <label className="flex flex-col gap-1 md:col-span-2">
           <span className="text-sm font-medium">Passenger 1</span>
-          <select
-            className="border rounded px-3 py-2"
-            value={p1Id}
-            onChange={(e) => setP1Id(e.target.value)}
-            disabled={loading}
-            required
-          >
+          <select className="border rounded px-3 py-2" value={p1Id} onChange={(e) => setP1Id(e.target.value)} required>
             <option value="">Select passenger</option>
-            {p1Opts.map((p) => (
-              <option key={p.id} value={p.id}>
-                {optionLabel(p)}
-              </option>
-            ))}
+            {filter(pickers.passengers, p1Id).map((p) => (<option key={p.id} value={p.id}>{p.display_name}</option>))}
           </select>
         </label>
 
         <label className="flex flex-col gap-1 md:col-span-2">
           <span className="text-sm font-medium">Passenger 2 (optional)</span>
           <select
-            className="border rounded px-3 py-2"
+            className={"border rounded px-3 py-2 " + (!p1Id ? "bg-gray-100 opacity-60 cursor-not-allowed" : "")}
             value={p2Id}
             onChange={(e) => setP2Id(e.target.value)}
-            disabled={loading}
+            disabled={!p1Id}
           >
-            <option value="">— None —</option>
-            {p2Opts.map((p) => (
-              <option key={p.id} value={p.id}>
-                {optionLabel(p)}
-              </option>
-            ))}
+            <option value="">—</option>
+            {filter(pickers.passengers, p2Id).map((p) => (<option key={p.id} value={p.id}>{p.display_name}</option>))}
           </select>
+          {!p1Id && <span className="text-xs text-gray-500 mt-1">Choose Passenger 1 first</span>}
         </label>
 
-        <label className="flex flex-col gap-1 md:col-span-2">
-          <span className="text-sm font-medium">Pickup location</span>
-          <select
-            className="border rounded px-3 py-2"
-            value={pickupId}
-            onChange={(e) => setPickupId(e.target.value)}
-            disabled={loading}
-          >
-            <option value="">Select pickup</option>
-            {pickups.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="flex flex-col gap-1 md:col-span-2">
-          <span className="text-sm font-medium">Notes</span>
-          <textarea
-            className="border rounded px-3 py-2 min-h-[120px]"
-            value={notes ?? ""}
-            onChange={(e) => setNotes(e.target.value)}
-          />
+        <label className="flex flex-col gap-1 md:col-span-3">
+          <span className="text-sm font-medium">Pre-ride notes</span>
+          <textarea className="border rounded px-3 py-2 min-h-[80px]" value={notes} onChange={(e) => setNotes(e.target.value)} />
         </label>
       </div>
 
-      <div className="mt-4 flex gap-3 justify-end">
-        <button
-          type="button"
-          className="px-4 py-2 rounded border"
-          onClick={() => props.onCancel?.()}
-        >
-          Cancel
-        </button>
-        <button
-          type="submit"
-          className="px-4 py-2 rounded bg-black text-white disabled:opacity-50"
-          disabled={loading}
-        >
-          Save
-        </button>
+      <div className="flex items-center gap-3 justify-end">
+        <button type="button" className="px-4 py-2 rounded border" onClick={onCancelClick}>Cancel</button>
+        <button type="submit" className="px-4 py-2 rounded bg-black text-white disabled:opacity-50" disabled={saving}>Save</button>
       </div>
     </form>
   );
-};
-
-export default RideForm;
+}
