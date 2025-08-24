@@ -2,8 +2,23 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 
+/** Named type export so pages can `import { RideEvent } from "components/RideForm"` */
+export type RideEvent = {
+  id?: string;
+  date?: string | null;
+  time?: string | null;
+  status?: string | null;
+  pilot_id?: string | null;
+  passenger1_id?: string | null;
+  passenger2_id?: string | null;
+  emergency_contact_id?: string | null;
+  pickup_location_id?: string | null; // legacy pages may reference this
+  pickup_id?: string | null;          // form uses this internally
+  notes?: string | null;
+};
+
 /**
- * Drop‑in RideForm that pulls picker options from server routes:
+ * Drop-in RideForm that pulls picker options from server routes:
  *   - /api/pickers/list  -> { pilots[], passengers[], emergencyContacts[] }
  *   - /api/pickups/list  -> { pickups[] }
  *
@@ -28,16 +43,7 @@ type RideFormProps = {
   onSaved?: (rideId?: string) => void;
   onSave?: (payload: any) => Promise<any> | any; // legacy compat
   // allow passing initial values (all optional)
-  initial?: Partial<{
-    date: string;
-    time: string;
-    pilot_id: string;
-    passenger1_id: string;
-    passenger2_id: string | null;
-    emergency_contact_id: string;
-    pickup_id: string | null;
-    notes: string | null;
-  }>;
+  initial?: Partial<RideEvent>;
 };
 
 function optionLabel(o?: PersonOption | null) {
@@ -63,7 +69,7 @@ const RideForm: React.FC<RideFormProps> = (props) => {
   const [p1Id, setP1Id] = useState<string>(init.passenger1_id ?? "");
   const [p2Id, setP2Id] = useState<string>(init.passenger2_id ?? "");
   const [ecId, setEcId] = useState<string>(init.emergency_contact_id ?? "");
-  const [pickupId, setPickupId] = useState<string>(init.pickup_id ?? "");
+  const [pickupId, setPickupId] = useState<string>((init.pickup_id ?? init.pickup_location_id) ?? "");
   const [notes, setNotes] = useState<string>(init.notes ?? "");
 
   // Options
@@ -162,7 +168,6 @@ const RideForm: React.FC<RideFormProps> = (props) => {
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      {/* Simple layout that matches existing styles reasonably */}
       {err && (
         <div className="rounded bg-red-50 text-red-700 px-3 py-2 text-sm">
           {err}
@@ -175,7 +180,7 @@ const RideForm: React.FC<RideFormProps> = (props) => {
           <input
             type="date"
             className="border rounded px-3 py-2"
-            value={date}
+            value={date ?? ""}
             onChange={(e) => setDate(e.target.value)}
             required
           />
@@ -186,7 +191,7 @@ const RideForm: React.FC<RideFormProps> = (props) => {
           <input
             type="time"
             className="border rounded px-3 py-2"
-            value={time}
+            value={time ?? ""}
             onChange={(e) => setTime(e.target.value)}
             required
           />
@@ -284,7 +289,7 @@ const RideForm: React.FC<RideFormProps> = (props) => {
           <span className="text-sm font-medium">Notes</span>
           <textarea
             className="border rounded px-3 py-2 min-h-[120px]"
-            value={notes}
+            value={notes ?? ""}
             onChange={(e) => setNotes(e.target.value)}
           />
         </label>
