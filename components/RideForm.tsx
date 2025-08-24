@@ -1,7 +1,24 @@
 // components/RideForm.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
+
+export type RideEvent = {
+  id?: string;
+  date?: string | null;
+  time?: string | null;
+  status?: string | null;
+  pilot_id?: string | null;
+  passenger1_id?: string | null;
+  passenger2_id?: string | null;
+  emergency_contact_id?: string | null;
+  pickup_location_id?: string | null;
+  pre_ride_notes?: string | null;
+  post_ride_notes?: string | null;
+  locked?: boolean | null;
+  canceled_reason?: string | null;
+  start_at?: string | null;
+};
 
 type PersonOption = { id: string; display_name: string };
 type PickupOption = { id: string; name: string; address?: string | null };
@@ -18,12 +35,12 @@ export default function RideForm(props: {
 }) {
   const [date, setDate] = useState<string>("");
   const [time, setTime] = useState<string>("");
-  const [pilotId, setPilotId] = useState<string>("");
-  const [p1Id, setP1Id] = useState<string>("");
-  const [p2Id, setP2Id] = useState<string>("");
-  const [ecId, setEcId] = useState<string>("");
-  const [pickupId, setPickupId] = useState<string>("");
-  const [notes, setNotes] = useState<string>("");
+  const [pilotId, setPilotId] = useState<string>(""); 
+  const [p1Id, setP1Id] = useState<string>(""); 
+  const [p2Id, setP2Id] = useState<string>(""); 
+  const [ecId, setEcId] = useState<string>(""); 
+  const [pickupId, setPickupId] = useState<string>(""); 
+  const [notes, setNotes] = useState<string>(""); 
 
   const [pickers, setPickers] = useState<PickersPayload>({ pilots: [], passengers: [], emergencyContacts: [] });
   const [pickups, setPickups] = useState<PickupOption[]>([]);
