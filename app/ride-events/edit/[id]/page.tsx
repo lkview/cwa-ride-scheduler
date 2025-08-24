@@ -50,7 +50,7 @@ export default function EditRidePage() {
       <h1 className="text-2xl font-semibold mb-4">Edit Ride</h1>
       {err && <div className="mb-4 rounded bg-red-50 text-red-700 px-3 py-2 text-sm">{err}</div>}
       {loading ? <div>Loading…</div> : initial ? (
-        <RideForm initial={initial} rideId={id} onSaved={() => router.push("/")} />
+        <RideForm initial={initial} rideId={id} onSaved={() => router.push("/")} onCancel={() => router.push("/")} />
       ) : <div>Ride not found.</div>}
     </div>
   );

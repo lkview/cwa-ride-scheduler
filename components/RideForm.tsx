@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 export type RideEvent = {
   id?: string;
@@ -36,13 +37,14 @@ type RideFormProps = {
   onSaved?: (rideId?: string) => void;
 };
 
-const STATUS_OPTIONS = ["Draft", "Tentative", "Confirmed", "Canceled"];
+const STATUS_OPTIONS = ["Tentative", "Confirmed", "Completed", "Canceled"];
+
 function buildTimes(): { value: string; label: string }[] {
   const out: { value: string; label: string }[] = [];
   const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
   for (let h = 7; h <= 20; h++) {
     for (let m of [0, 30]) {
-      const value = `${pad(h)}:${pad(m)}:00`;
+      const value = `${pad(h)}:${pad(m)}:00`; // HH:MM:SS
       const dt = new Date();
       dt.setHours(h, m, 0, 0);
       const label = dt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -54,11 +56,12 @@ function buildTimes(): { value: string; label: string }[] {
 const TIME_OPTIONS = buildTimes();
 
 export default function RideForm(props: RideFormProps) {
+  const router = useRouter();
   const init = props.initial ?? {};
 
   const [date, setDate] = useState<string>(init.date ?? "");
   const [time, setTime] = useState<string>(init.time ?? "");
-  const [status, setStatus] = useState<string>(init.status ?? "Draft");
+  const [status, setStatus] = useState<string>(init.status ?? "Tentative");
   const [pilotId, setPilotId] = useState<string>(init.pilot_id ?? "");
   const [p1Id, setP1Id] = useState<string>(init.passenger1_id ?? "");
   const [p2Id, setP2Id] = useState<string>(init.passenger2_id ?? "");
@@ -89,6 +92,12 @@ export default function RideForm(props: RideFormProps) {
     load();
     return () => { alive = false; };
   }, []);
+
+  // If only one option is available for a dropdown, select it by default.
+  useEffect(() => { if (!pilotId && pickers.pilots.length === 1) setPilotId(pickers.pilots[0].id); }, [pickers.pilots, pilotId]);
+  useEffect(() => { if (!ecId && pickers.emergencyContacts.length === 1) setEcId(pickers.emergencyContacts[0].id); }, [pickers.emergencyContacts, ecId]);
+  useEffect(() => { if (!p1Id && pickers.passengers.length === 1) setP1Id(pickers.passengers[0].id); }, [pickers.passengers, p1Id]);
+  useEffect(() => { if (!pickupId && pickups.length === 1) setPickupId(pickups[0].id); }, [pickups, pickupId]);
 
   const selectedIds = [pilotId, p1Id, p2Id, ecId].filter(Boolean) as string[];
   const filter = (list: PersonOption[], keep?: string) =>
@@ -133,6 +142,11 @@ export default function RideForm(props: RideFormProps) {
     } finally {
       setSaving(false);
     }
+  }
+
+  function onCancelClick() {
+    if (props.onCancel) props.onCancel();
+    else router.back();
   }
 
   return (
@@ -191,10 +205,16 @@ export default function RideForm(props: RideFormProps) {
 
         <label className="flex flex-col gap-1 md:col-span-2">
           <span className="text-sm font-medium">Passenger 2 (optional)</span>
-          <select className="border rounded px-3 py-2" value={p2Id} onChange={(e) => setP2Id(e.target.value)}>
+          <select
+            className={"border rounded px-3 py-2 " + (!p1Id ? "bg-gray-100 opacity-60 cursor-not-allowed" : "")}
+            value={p2Id}
+            onChange={(e) => setP2Id(e.target.value)}
+            disabled={!p1Id}
+          >
             <option value="">—</option>
             {filter(pickers.passengers, p2Id).map((p) => (<option key={p.id} value={p.id}>{p.display_name}</option>))}
           </select>
+          {!p1Id && <span className="text-xs text-gray-500 mt-1">Choose Passenger 1 first</span>}
         </label>
 
         <label className="flex flex-col gap-1 md:col-span-3">
@@ -204,7 +224,7 @@ export default function RideForm(props: RideFormProps) {
       </div>
 
       <div className="flex items-center gap-3 justify-end">
-        <button type="button" className="px-4 py-2 rounded border" onClick={props.onCancel}>Cancel</button>
+        <button type="button" className="px-4 py-2 rounded border" onClick={onCancelClick}>Cancel</button>
         <button type="submit" className="px-4 py-2 rounded bg-black text-white disabled:opacity-50" disabled={saving}>Save</button>
       </div>
     </form>

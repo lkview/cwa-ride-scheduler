@@ -15,11 +15,13 @@ type RideRow = {
 };
 
 export default function HomePage() {
-  const [open, setOpen] = useState(false);
   const [counts, setCounts] = useState({ pickups: 0, pilots: 0, passengers: 0, contacts: 0 });
   const [rides, setRides] = useState<RideRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   async function refreshCounts() {
     const [p, k] = await Promise.all([
@@ -58,15 +60,21 @@ export default function HomePage() {
     } catch { return `${d}${t ? " " + t : ""}`; }
   };
 
-  async function onDelete(id: string) {
-    if (!confirm("Delete this ride?")) return;
-    const resp = await fetch(`/api/rides/${id}`, { method: "DELETE" });
-    if (!resp.ok) {
-      const j = await resp.json().catch(() => ({}));
-      alert(j?.error || "Delete failed");
-      return;
+  async function confirmDelete() {
+    if (!pendingDeleteId) return;
+    setDeleting(true);
+    try {
+      const resp = await fetch(`/api/rides/${pendingDeleteId}`, { method: "DELETE" });
+      if (!resp.ok) {
+        const j = await resp.json().catch(() => ({}));
+        alert(j?.error || "Delete failed");
+        return;
+      }
+      setPendingDeleteId(null);
+      refreshRides();
+    } finally {
+      setDeleting(false);
     }
-    refreshRides();
   }
 
   return (
@@ -112,7 +120,7 @@ export default function HomePage() {
                   <td className="px-3 py-2">{r.status || "—"}</td>
                   <td className="px-3 py-2">
                     <a className="mr-3 underline" href={`/ride-events/edit/${r.id}`}>Edit</a>
-                    <button className="text-red-600 underline" onClick={() => onDelete(r.id)}>Delete</button>
+                    <button className="text-red-600 underline" onClick={() => setPendingDeleteId(r.id)}>Delete</button>
                   </td>
                 </tr>
               ))
@@ -120,6 +128,23 @@ export default function HomePage() {
           </tbody>
         </table>
       </div>
+
+      {pendingDeleteId && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-lg p-6 w-[420px]">
+            <h2 className="text-lg font-semibold mb-2">Remove this ride?</h2>
+            <p className="text-sm text-gray-600 mb-4">
+              This will remove the ride from the schedule. You can always create it again later.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button className="px-4 py-2 rounded border" onClick={() => setPendingDeleteId(null)} disabled={deleting}>Cancel</button>
+              <button className="px-4 py-2 rounded bg-red-600 text-white disabled:opacity-50" onClick={confirmDelete} disabled={deleting}>
+                {deleting ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

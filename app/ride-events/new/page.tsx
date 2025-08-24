@@ -10,7 +10,7 @@ export default function NewRidePage() {
   return (
     <div className="p-6">
       <h1 className="text-2xl font-semibold mb-4">New Ride</h1>
-      <RideForm onSaved={() => router.push("/")} />
+      <RideForm onSaved={() => router.push("/")} onCancel={() => router.push("/")} />
     </div>
   );
 }
