@@ -20,6 +20,7 @@ export default function AdminPickupsPage() {
   const [loading, setLoading] = useState(true);
 
   const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<Pickup | null>(null);
   const [form, setForm] = useState({ name: '', address: '', notes: '' });
   const [saving, setSaving] = useState(false);
   const [formErr, setFormErr] = useState<string | null>(null);
@@ -42,21 +43,38 @@ export default function AdminPickupsPage() {
 
   useEffect(() => { load(); }, []);
 
+  function openNew() {
+    setEditing(null);
+    setForm({ name: '', address: '', notes: '' });
+    setFormErr(null);
+    setModalOpen(true);
+  }
+
+  function openEdit(p: Pickup) {
+    setEditing(p);
+    setForm({ name: p.name || '', address: p.address || '', notes: p.notes || '' });
+    setFormErr(null);
+    setModalOpen(true);
+  }
+
   async function onSave() {
     setSaving(true);
     setFormErr(null);
     try {
-      const res = await fetch('/api/pickups/create', {
+      const url = editing ? '/api/pickups/update' : '/api/pickups/create';
+      const body = editing
+        ? { id: editing.id, name: form.name, address: form.address, notes: form.notes || null }
+        : { name: form.name, address: form.address, notes: form.notes || null };
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: form.name, address: form.address, notes: form.notes || null }),
+        body: JSON.stringify(body),
       });
       const json = await res.json().catch(() => ({} as any));
       if (!res.ok) {
         setFormErr(json?.error || 'Save failed');
       } else {
         setModalOpen(false);
-        setForm({ name: '', address: '', notes: '' });
         await load();
       }
     } catch (e: any) {
@@ -66,13 +84,32 @@ export default function AdminPickupsPage() {
     }
   }
 
+  async function onDelete(p: Pickup) {
+    if (!confirm(`Delete "${p.name}"?`)) return;
+    try {
+      const res = await fetch('/api/pickups/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: p.id }),
+      });
+      const json = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        alert(json?.error || 'Delete failed');
+      } else {
+        await load();
+      }
+    } catch (e: any) {
+      alert(e?.message || 'Delete failed');
+    }
+  }
+
   return (
     <div style={{ maxWidth: 1000, margin: '2rem auto', fontFamily: 'system-ui, sans-serif' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 style={{ margin: 0 }}>Pickup Locations</h1>
         <div style={{ display: 'flex', gap: 8 }}>
           <a href="/admin/pickups-debug" style={{ padding: '0.6rem 1rem', borderRadius: 8, border: '1px solid #ccc', textDecoration: 'none' }}>Open Debug View</a>
-          <button onClick={() => setModalOpen(true)} style={{ padding: '0.6rem 1rem', background: 'black', color: 'white', borderRadius: 8 }}>New pickup</button>
+          <button onClick={openNew} style={{ padding: '0.6rem 1rem', background: 'black', color: 'white', borderRadius: 8 }}>New pickup</button>
         </div>
       </div>
 
@@ -91,17 +128,22 @@ export default function AdminPickupsPage() {
                 <th style={th}>Name</th>
                 <th style={th}>Address</th>
                 <th style={th}>Notes</th>
+                <th style={th}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {pickups.length === 0 ? (
-                <tr><td colSpan={3} style={{ padding: '1rem', textAlign: 'center', color: '#666' }}>No pickup locations.</td></tr>
+                <tr><td colSpan={4} style={{ padding: '1rem', textAlign: 'center', color: '#666' }}>No pickup locations.</td></tr>
               ) : (
                 pickups.map(p => (
                   <tr key={p.id} style={{ borderTop: '1px solid #eee' }}>
                     <td style={td}>{p.name}</td>
                     <td style={td}>{p.address}</td>
                     <td style={td}>{p.notes || ''}</td>
+                    <td style={td}>
+                      <button onClick={() => openEdit(p)} style={btn}>Edit</button>
+                      <button onClick={() => onDelete(p)} style={{ ...btn, marginLeft: 8, background: '#eee' }}>Delete</button>
+                    </td>
                   </tr>
                 ))
               )}
@@ -114,7 +156,7 @@ export default function AdminPickupsPage() {
         <div style={modalBackdrop}>
           <div style={modalCard}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0 }}>New pickup</h3>
+              <h3 style={{ margin: 0 }}>{editing ? 'Edit pickup' : 'New pickup'}</h3>
               <button onClick={() => setModalOpen(false)} style={{ fontSize: 20, lineHeight: 1, background: 'transparent', border: 'none' }}>×</button>
             </div>
 

@@ -1,28 +1,20 @@
 import { NextResponse } from "next/server";
 import { getServerSupabase } from "@/app/lib/supabaseServer";
 
-export async function POST(request: Request) {
-  const body = await request.json().catch(() => ({}));
-  if (!body.id) {
-    return NextResponse.json({ error: "Missing id" }, { status: 400 });
-  }
+export async function POST(req: Request) {
   const supabase = await getServerSupabase();
+  const body = await req.json().catch(() => ({}));
+  const { id, name, address, notes } = body || {};
 
-  const updates: any = {};
-  for (const k of ["name", "address", "notes", "lat", "lng"]) {
-    if (k in body) updates[k] = body[k];
+  if (!id || !name || !address) {
+    return NextResponse.json({ error: "Missing id, name, or address" }, { status: 400 });
   }
 
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from("pickup_locations")
-    .update(updates)
-    .eq("id", body.id)
-    .select("id")
-    .single();
+    .update({ name, address, notes })
+    .eq("id", id);
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 400 });
-  }
-
-  return NextResponse.json({ id: data.id, ok: true });
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  return NextResponse.json({ ok: true });
 }
