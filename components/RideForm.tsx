@@ -16,6 +16,7 @@ export type RideEvent = {
   pickup_location_id?: string | null;
   pre_ride_notes?: string | null;
   post_ride_notes?: string | null;
+  locked?: boolean | null; // <-- added so edit page can reference initial.locked
 };
 
 type PersonOption = { id: string; display_name: string };
@@ -151,6 +152,10 @@ export default function RideForm(props: RideFormProps) {
     else router.back();
   }
 
+  function disabledCls() {
+    return "bg-gray-100 opacity-60 cursor-not-allowed";
+  }
+
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       {err && <div className="rounded bg-red-50 text-red-700 px-3 py-2 text-sm">{err}</div>}
@@ -210,7 +215,7 @@ export default function RideForm(props: RideFormProps) {
         <label className="flex flex-col gap-1 md:col-span-2">
           <span className="text-sm font-medium">Passenger 2 (optional)</span>
           <select
-            className={"border rounded px-3 py-2 " + (!p1Id ? "bg-gray-100 opacity-60 cursor-not-allowed" : "")}
+            className={"border rounded px-3 py-2 " + (!p1Id ? disabledCls() : "")}
             value={p2Id}
             onChange={(e) => setP2Id(e.target.value)}
             disabled={!p1Id}
