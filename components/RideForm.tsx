@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 
 /** Named type export so pages can `import { RideEvent } from "components/RideForm"`.
- *  Extended to include `locked?: boolean` to satisfy edit page checks.
+ *  Extended to include fields used by edit page (e.g., `locked`).
  */
 export type RideEvent = {
   id?: string;
@@ -17,8 +17,8 @@ export type RideEvent = {
   pickup_location_id?: string | null; // legacy pages may reference this
   pickup_id?: string | null;          // form uses this internally
   notes?: string | null;
-  locked?: boolean | null;            // <-- added for edit page type
-  canceled_reason?: string | null;    // future-proofing
+  locked?: boolean | null;
+  canceled_reason?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -45,6 +45,7 @@ type PickersPayload = {
 };
 
 type RideFormProps = {
+  rideId?: string; // <-- added to satisfy edit page prop
   onCancel?: () => void;
   onSaved?: (rideId?: string) => void;
   onSave?: (payload: any) => Promise<any> | any; // legacy compat
@@ -150,7 +151,7 @@ const RideForm: React.FC<RideFormProps> = (props) => {
     try {
       if (typeof props.onSave === "function") {
         await props.onSave(payload);
-        props.onSaved?.();
+        props.onSaved?.(props.rideId);
         return;
       }
       // Fallback generic POST (no-op if endpoint doesn't exist)
@@ -161,14 +162,14 @@ const RideForm: React.FC<RideFormProps> = (props) => {
       }).catch(() => null);
       if (resp && resp.ok) {
         const j = await resp.json().catch(() => ({}));
-        props.onSaved?.(j?.id);
+        props.onSaved?.(j?.id ?? props.rideId);
       } else {
         // Even if POST isn't available, we still close to preserve UX
-        props.onSaved?.();
+        props.onSaved?.(props.rideId);
       }
     } catch (e) {
       console.error(e);
-      props.onSaved?.();
+      props.onSaved?.(props.rideId);
     }
   }
 
