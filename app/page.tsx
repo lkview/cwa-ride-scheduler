@@ -2,9 +2,6 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import dynamic from "next/dynamic";
-
-const RideForm = dynamic(() => import("../components/RideForm"), { ssr: false });
 
 type RideRow = {
   id: string;
@@ -61,6 +58,17 @@ export default function HomePage() {
     } catch { return `${d}${t ? " " + t : ""}`; }
   };
 
+  async function onDelete(id: string) {
+    if (!confirm("Delete this ride?")) return;
+    const resp = await fetch(`/api/rides/${id}`, { method: "DELETE" });
+    if (!resp.ok) {
+      const j = await resp.json().catch(() => ({}));
+      alert(j?.error || "Delete failed");
+      return;
+    }
+    refreshRides();
+  }
+
   return (
     <div className="p-6">
       <h1 className="text-2xl font-semibold mb-6">Rides</h1>
@@ -71,14 +79,14 @@ export default function HomePage() {
       </div>
 
       <div className="mb-4 flex items-center justify-between">
-        <button className="px-4 py-2 rounded bg-black text-white" onClick={() => setOpen(true)}>New ride</button>
+        <a className="px-4 py-2 rounded bg-black text-white" href="/ride-events/new">New ride</a>
         <button className="px-3 py-1 rounded border" onClick={refreshRides}>Refresh</button>
       </div>
 
       {err && <div className="mb-4 rounded bg-red-50 text-red-700 px-3 py-2 text-sm">{err}</div>}
 
       <div className="overflow-x-auto rounded border">
-        <table className="min-w-[700px] w-full text-sm">
+        <table className="min-w-[900px] w-full text-sm">
           <thead className="bg-gray-50">
             <tr>
               <th className="text-left px-3 py-2">When</th>
@@ -86,13 +94,14 @@ export default function HomePage() {
               <th className="text-left px-3 py-2">Passengers</th>
               <th className="text-left px-3 py-2">Pickup</th>
               <th className="text-left px-3 py-2">Status</th>
+              <th className="text-left px-3 py-2">Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={5} className="px-3 py-8 text-center">Loading rides…</td></tr>
+              <tr><td colSpan={6} className="px-3 py-8 text-center">Loading rides…</td></tr>
             ) : rides.length === 0 ? (
-              <tr><td colSpan={5} className="px-3 py-8 text-center text-gray-500">No rides yet.</td></tr>
+              <tr><td colSpan={6} className="px-3 py-8 text-center text-gray-500">No rides yet.</td></tr>
             ) : (
               rides.map((r) => (
                 <tr key={r.id} className="border-t">
@@ -101,22 +110,16 @@ export default function HomePage() {
                   <td className="px-3 py-2">{[r.passenger1_name, r.passenger2_name].filter(Boolean).join(", ") || "—"}</td>
                   <td className="px-3 py-2">{r.pickup_name || "—"}</td>
                   <td className="px-3 py-2">{r.status || "—"}</td>
+                  <td className="px-3 py-2">
+                    <a className="mr-3 underline" href={`/ride-events/edit/${r.id}`}>Edit</a>
+                    <button className="text-red-600 underline" onClick={() => onDelete(r.id)}>Delete</button>
+                  </td>
                 </tr>
               ))
             )}
           </tbody>
         </table>
       </div>
-
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white rounded shadow-lg w-[900px] max-w-[95vw] p-6 relative">
-            <button className="absolute right-3 top-3 text-xl" onClick={() => setOpen(false)} aria-label="Close">×</button>
-            <h2 className="text-xl font-medium mb-4">New ride</h2>
-            <RideForm onCancel={() => setOpen(false)} onSaved={() => { setOpen(false); refreshRides(); }} />
-          </div>
-        </div>
-      )}
     </div>
   );
 }
