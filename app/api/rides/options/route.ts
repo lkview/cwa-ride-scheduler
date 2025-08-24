@@ -1,89 +1,101 @@
+// app/api/rides/options/route.ts
 import { NextResponse } from "next/server";
 import { getServerSupabase } from "@/app/lib/supabaseServer";
 
+// Helper: safest label we can derive from a row
+function displayName(r: any) {
+  const fn = (r?.first_name ?? "").trim();
+  const ln = (r?.last_name ?? "").trim();
+  const full = [fn, ln].filter(Boolean).join(" ").trim();
+  return (
+    full ||
+    r?.display_name ||
+    r?.name ||
+    r?.email ||
+    r?.phone ||
+    "Unnamed"
+  );
+}
+
+// Normalize a person row into what the UI already understands
+function personOut(r: any) {
+  return {
+    id: r.id,
+    first_name: r.first_name ?? null,
+    last_name: r.last_name ?? null,
+    email: r.email ?? null,
+    phone: r.phone ?? null,
+    display_name: displayName(r),
+  };
+}
+
+// Normalize a pickup row
+function pickupOut(r: any) {
+  return {
+    id: r.id,
+    name: r.name ?? r.display_name ?? r.title ?? "Pickup",
+    address: r.address ?? null,
+    notes: r.notes ?? null,
+  };
+}
+
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
-type Row = Record<string, any>;
-
-function nameFromRow(r: Row): string {
-  const first = r.first_name || r.firstname || r.first || "";
-  const last = r.last_name || r.lastname || r.last || "";
-  const full = [first, last].filter(Boolean).join(" ").trim();
-  return r.name || r.full_name || r.display_name || full || r.email || "Unknown";
-}
-function idFromRow(r: Row): string | null {
-  return r.id || r.person_id || r.user_id || r.contact_id || null;
-}
-function normalize(rows: Row[] | null | undefined): { id: string; name: string }[] {
-  if (!rows) return [];
-  const out: { id: string; name: string }[] = [];
-  for (const r of rows) {
-    const id = idFromRow(r);
-    if (id) out.push({ id: String(id), name: nameFromRow(r) });
-  }
-  // stable sort by name
-  out.sort((a, b) => a.name.localeCompare(b.name));
-  return out;
-}
-
-async function safeSelect(supabase: any, table: string, columns: string) {
-  try {
-    const { data, error } = await supabase.from(table).select(columns);
-    if (error) return { data: null, error: error.message };
-    return { data, error: null };
-  } catch (e: any) {
-    return { data: null, error: e?.message || "query failed" };
-  }
-}
 
 export async function GET() {
   const supabase = await getServerSupabase();
 
-  // Pickups from public.pickup_locations
-  const { data: pickupsData, error: pickupsErr } = await supabase
+  // Use the SECURITY DEFINER roster view so RLS won’t block us.
+  // It includes: id, first_name, last_name, email, phone, roles (array), roles_title, etc.
+  const baseSelect =
+    "id, first_name, last_name, email, phone, roles";
+
+  // Everyone who can be a passenger = full roster (any role)
+  const { data: roster, error: rosterErr } = await supabase
+    .from("people_roster_v")
+    .select(baseSelect)
+    .order("last_name", { ascending: true })
+    .order("first_name", { ascending: true });
+
+  if (rosterErr) {
+    // If the view somehow fails, don’t silently widen access; fail loud.
+    return NextResponse.json(
+      { error: `Failed to load roster: ${rosterErr.message}` },
+      { status: 500 }
+    );
+  }
+
+  const rows = roster ?? [];
+
+  // Filter by roles from the roster view
+  const hasRole = (r: any, key: string) =>
+    Array.isArray(r?.roles) && r.roles.includes(key);
+
+  const pilots = rows.filter((r) => hasRole(r, "pilot")).map(personOut);
+  const emergency_contacts = rows
+    .filter((r) => hasRole(r, "emergency_contact"))
+    .map(personOut);
+  const passengers = rows.map(personOut); // requirement: passengers list = anyone
+
+  // Pickups as before
+  const { data: pickupsRaw, error: pickupsErr } = await supabase
     .from("pickup_locations")
-    .select("id,name,address,notes")
-    .order("name");
+    .select("id, name, address, notes")
+    .order("name", { ascending: true });
 
-  // Try role-specific views if they exist, otherwise fallback to people
-  let pilots = normalize(null);
-  let passengers = normalize(null);
-  let contacts = normalize(null);
-
-  // pilots
-  let q = await safeSelect(supabase, "pilots", "id,name,first_name,last_name,display_name,full_name,email");
-  if (!q.error && q.data && q.data.length) {
-    pilots = normalize(q.data);
-  } else {
-    const { data } = await supabase.from("people").select("id,first_name,last_name,name,email").order("last_name");
-    pilots = normalize(data);
+  if (pickupsErr) {
+    return NextResponse.json(
+      { error: `Failed to load pickups: ${pickupsErr.message}` },
+      { status: 500 }
+    );
   }
 
-  // passengers
-  q = await safeSelect(supabase, "passengers", "id,name,first_name,last_name,display_name,full_name,email");
-  if (!q.error && q.data && q.data.length) {
-    passengers = normalize(q.data);
-  } else {
-    const { data } = await supabase.from("people").select("id,first_name,last_name,name,email").order("last_name");
-    passengers = normalize(data);
-  }
+  const pickups = (pickupsRaw ?? []).map(pickupOut);
 
-  // emergency contacts
-  q = await safeSelect(supabase, "emergency_contacts", "id,name,first_name,last_name,display_name,full_name,email");
-  if (!q.error && q.data && q.data.length) {
-    contacts = normalize(q.data);
-  } else {
-    const { data } = await supabase.from("people").select("id,first_name,last_name,name,email").order("last_name");
-    contacts = normalize(data);
-  }
-
+  // Keep the exact shape the page expects
   return NextResponse.json({
-    schemaUsed: "public",
-    pickups: pickupsData ?? [],
-    pickupsError: pickupsErr || null,
     pilots,
     passengers,
-    emergency_contacts: contacts,
+    emergency_contacts,
+    pickups,
   });
 }
