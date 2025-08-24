@@ -2,12 +2,23 @@
 
 import { useEffect, useState } from 'react';
 
+type Option = { id: string; name: string };
 type Pickup = { id: string; name: string; address: string; notes: string | null };
 
 export default function HomePage() {
   const [open, setOpen] = useState(false);
+
   const [pickups, setPickups] = useState<Pickup[]>([]);
-  const [pickupId, setPickupId] = useState<string>('');
+  const [pilots, setPilots] = useState<Option[]>([]);
+  const [passengers, setPassengers] = useState<Option[]>([]);
+  const [contacts, setContacts] = useState<Option[]>([]);
+
+  const [pickupId, setPickupId] = useState('');
+  const [pilotId, setPilotId] = useState('');
+  const [passenger1Id, setPassenger1Id] = useState('');
+  const [passenger2Id, setPassenger2Id] = useState('');
+  const [contactId, setContactId] = useState('');
+
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
@@ -16,12 +27,15 @@ export default function HomePage() {
       setLoading(true);
       setErr(null);
       try {
-        const res = await fetch('/api/pickups/list', { cache: 'no-store' });
+        const res = await fetch('/api/rides/options', { cache: 'no-store' });
         const json = await res.json();
         setPickups(json?.pickups || []);
-        if (json?.error) setErr(json.error);
+        setPilots(json?.pilots || []);
+        setPassengers(json?.passengers || []);
+        setContacts(json?.emergency_contacts || []);
+        if (json?.error || json?.pickupsError) setErr(json.error || json.pickupsError);
       } catch (e: any) {
-        setErr(e?.message || 'Failed to load pickups');
+        setErr(e?.message || 'Failed to load options');
       } finally {
         setLoading(false);
       }
@@ -34,7 +48,12 @@ export default function HomePage() {
       <h1>Rides</h1>
 
       <div style={{ marginTop: 8, background: '#fff8e1', border: '1px solid #ffe082', borderRadius: 8, padding: 10 }}>
-        <b>Debug:</b> pickup options loaded: <b>{pickups.length}</b>{err && <span style={{ color: 'crimson' }}>&nbsp;error: {err}</span>}
+        <b>Debug:</b>
+        &nbsp;pickups: <b>{pickups.length}</b> ·
+        &nbsp;pilots: <b>{pilots.length}</b> ·
+        &nbsp;passengers: <b>{passengers.length}</b> ·
+        &nbsp;contacts: <b>{contacts.length}</b>
+        {err && <span style={{ color: 'crimson' }}>&nbsp;error: {err}</span>}
       </div>
 
       <div style={{ marginTop: 16 }}>
@@ -59,7 +78,7 @@ export default function HomePage() {
               <div>
                 <label style={label}>Time</label>
                 <select style={input}>
-                  <option>Select time</option>
+                  <option value="">Select time</option>
                   <option>8:00 AM</option>
                   <option>9:00 AM</option>
                   <option>10:00 AM</option>
@@ -68,33 +87,39 @@ export default function HomePage() {
 
               <div>
                 <label style={label}>Pilot</label>
-                <select style={input}><option>Select a pilot</option></select>
+                <select style={input} value={pilotId} onChange={e => setPilotId(e.target.value)}>
+                  <option value="">Select a pilot</option>
+                  {pilots.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
               </div>
               <div>
                 <label style={label}>Emergency Contact</label>
-                <select style={input}><option>Select emergency contact</option></select>
+                <select style={input} value={contactId} onChange={e => setContactId(e.target.value)}>
+                  <option value="">Select emergency contact</option>
+                  {contacts.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
               </div>
 
               <div>
                 <label style={label}>Passenger 1</label>
-                <select style={input}><option>Select passenger</option></select>
+                <select style={input} value={passenger1Id} onChange={e => setPassenger1Id(e.target.value)}>
+                  <option value="">Select passenger</option>
+                  {passengers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
               </div>
               <div>
                 <label style={label}>Passenger 2 (optional)</label>
-                <select style={input}><option>— None —</option></select>
+                <select style={input} value={passenger2Id} onChange={e => setPassenger2Id(e.target.value)}>
+                  <option value="">— None —</option>
+                  {passengers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
               </div>
 
               <div style={{ gridColumn: '1 / span 2' }}>
                 <label style={label}>Pickup location</label>
-                <select
-                  value={pickupId}
-                  onChange={e => setPickupId(e.target.value)}
-                  style={input}
-                >
+                <select value={pickupId} onChange={e => setPickupId(e.target.value)} style={input}>
                   <option value="">Select pickup</option>
-                  {pickups.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
+                  {pickups.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
               </div>
 
