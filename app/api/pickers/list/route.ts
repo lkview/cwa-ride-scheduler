@@ -2,74 +2,52 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-// Ensure this runs on Node (not edge), where env secrets are available.
-export const runtime = "nodejs";
+// ensure no caching in Edge/CDN
+export const dynamic = "force-dynamic";
 
-type PickerRow = {
-  id: string;
-  display_name: string;
-  email: string | null;
-  phone: string | null;
-};
-
-type PickupRow = {
-  id: string;
-  name: string;
-  address: string | null;
-  notes: string | null;
-};
-
-function getSupabaseAsService() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY!; // set in Vercel > Settings > Environment Variables
-  return createClient(url, key, { auth: { persistSession: false } });
-}
+type PickerRow = { id: string; display_name: string };
 
 export async function GET() {
-  const supabase = getSupabaseAsService();
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRole = process.env.SUPABASE_SERVICE_ROLE;
 
-  const [pilots, ecs, passengers, pickupsV] = await Promise.all([
-    supabase
-      .from("picker_pilots_v")
-      .select<"*", PickerRow>("*")
-      .order("display_name", { ascending: true }),
-    supabase
-      .from("picker_emergency_contacts_v")
-      .select<"*", PickerRow>("*")
-      .order("display_name", { ascending: true }),
-    supabase
-      .from("picker_passengers_v")
-      .select<"*", PickerRow>("*")
-      .order("display_name", { ascending: true }),
-    supabase
-      .from("pickup_locations_v")
-      .select<"id,name,address,notes", PickupRow>("id,name,address,notes")
-      .order("name", { ascending: true }),
-  ]);
-
-  // Fallback to base table if the _v view isn’t present
-  let pickups: PickupRow[] = pickupsV.data ?? [];
-  let pickupsErr = pickupsV.error?.message ?? null;
-
-  if (!pickups.length) {
-    const table = await supabase
-      .from("pickup_locations")
-      .select<"id,name,address,notes", PickupRow>("id,name,address,notes")
-      .order("name", { ascending: true });
-    pickups = table.data ?? [];
-    pickupsErr = pickupsErr ?? table.error?.message ?? null;
+  if (!url || !serviceRole) {
+    return NextResponse.json(
+      { error: "Missing SUPABASE env vars" },
+      { status: 500 }
+    );
   }
 
-  return NextResponse.json({
-    pilots: pilots.data ?? [],
-    emergencyContacts: ecs.data ?? [],
-    passengers: passengers.data ?? [],
-    pickups,
-    meta: {
-      pilotsErr: pilots.error?.message ?? null,
-      ecErr: ecs.error?.message ?? null,
-      passengersErr: passengers.error?.message ?? null,
-      pickupsErr,
-    },
+  const supabase = createClient(url, serviceRole, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { fetch: fetch as any },
   });
+
+  const [pilotsRes, ecsRes, passengersRes] = await Promise.all([
+    supabase.from("picker_pilots_v").select("id, display_name").order("display_name"),
+    supabase.from("picker_emergency_contacts_v").select("id, display_name").order("display_name"),
+    supabase.from("picker_passengers_v").select("id, display_name").order("display_name"),
+  ]);
+
+  const mapRows = (res: any): PickerRow[] => {
+    if (res.error) {
+      // Surface the first error to help debugging
+      throw res.error;
+    }
+    return (res.data ?? []).map((r: any) => ({
+      id: r.id,
+      display_name: r.display_name,
+    }));
+  };
+
+  try {
+    const payload = {
+      pilots: mapRows(pilotsRes),
+      emergencyContacts: mapRows(ecsRes),
+      passengers: mapRows(passengersRes),
+    };
+    return NextResponse.json(payload);
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message ?? String(e) }, { status: 500 });
+  }
 }
