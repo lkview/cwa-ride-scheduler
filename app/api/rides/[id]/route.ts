@@ -17,13 +17,13 @@ type RideUpdate = {
   post_ride_notes?: string | null;
 };
 
-function idFromParams(params: { id?: string[] | string }): string | null {
-  const raw = Array.isArray(params.id) ? params.id[0] : params.id;
-  return raw ?? null;
+function idFromContext(ctx: any): string | null {
+  const raw = ctx?.params?.id;
+  return Array.isArray(raw) ? raw[0] : raw ?? null;
 }
 
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
-  const id = idFromParams(params);
+export async function GET(_req: Request, ctx: any) {
+  const id = idFromContext(ctx);
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
   const supabase = getAdminClient();
   const { data, error } = await supabase.from("ride_events").select("*").eq("id", id).single();
@@ -31,8 +31,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   return NextResponse.json({ ride: data });
 }
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
-  const id = idFromParams(params);
+export async function PATCH(req: Request, ctx: any) {
+  const id = idFromContext(ctx);
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
   const body = (await req.json().catch(() => ({}))) as RideUpdate;
   const update: any = {};
@@ -53,8 +53,8 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   return NextResponse.json({ ok: true });
 }
 
-export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
-  const id = idFromParams(params);
+export async function DELETE(_req: Request, ctx: any) {
+  const id = idFromContext(ctx);
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
   const supabase = getAdminClient();
   const { error } = await supabase.from("ride_events").delete().eq("id", id);
