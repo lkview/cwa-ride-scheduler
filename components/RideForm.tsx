@@ -2,7 +2,9 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 
-/** Named type export so pages can `import { RideEvent } from "components/RideForm"` */
+/** Named type export so pages can `import { RideEvent } from "components/RideForm"`.
+ *  Extended to include `locked?: boolean` to satisfy edit page checks.
+ */
 export type RideEvent = {
   id?: string;
   date?: string | null;
@@ -15,6 +17,10 @@ export type RideEvent = {
   pickup_location_id?: string | null; // legacy pages may reference this
   pickup_id?: string | null;          // form uses this internally
   notes?: string | null;
+  locked?: boolean | null;            // <-- added for edit page type
+  canceled_reason?: string | null;    // future-proofing
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 /**
