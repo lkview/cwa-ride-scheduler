@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabaseClient";
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string;
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 type RideUpdate = {
   date?: string | null;
@@ -13,7 +17,7 @@ type RideUpdate = {
   pre_ride_notes?: string | null;
 };
 
-function toDbStatusLower(s?: string | null) {
+function toLowerStatus(s?: string | null) {
   const v = String(s || "").toLowerCase().trim();
   if (v === "confirmed") return "confirmed";
   if (v === "completed") return "completed";
@@ -36,7 +40,7 @@ export async function PATCH(req: Request, context: any) {
   if (body.passenger1_id !== undefined) update.passenger1_id = body.passenger1_id;
   if (body.passenger2_id !== undefined) update.passenger2_id = body.passenger2_id;
   if (body.pre_ride_notes !== undefined) update.pre_ride_notes = body.pre_ride_notes;
-  if (body.status !== undefined) update.status = toDbStatusLower(body.status);
+  if (body.status !== undefined) update.status = toLowerStatus(body.status);
 
   const { error } = await supabase.from("ride_events").update(update).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
