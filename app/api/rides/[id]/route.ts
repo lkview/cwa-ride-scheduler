@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { supabase } from "../../../../lib/supabaseClient";
 
-export async function GET(_req: Request, ctx: { params: { id: string } }) {
-  const { id } = ctx.params || {};
+// Use a broadly-typed second argument to satisfy Next.js 15's route handler typing.
+export async function GET(_req: Request, context: any) {
+  const id = context?.params?.id as string | undefined;
   if (!id) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
   }
@@ -16,8 +17,8 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
     .single();
 
   if (error) {
-    const notFound = String(error.message || "").toLowerCase().includes("row not found");
-    if (notFound) {
+    const msg = (error.message || "").toLowerCase();
+    if (msg.includes("row") && msg.includes("not") && msg.includes("found")) {
       return NextResponse.json({ error: "Ride not found" }, { status: 404 });
     }
     return NextResponse.json({ error: error.message || "Database error" }, { status: 500 });
