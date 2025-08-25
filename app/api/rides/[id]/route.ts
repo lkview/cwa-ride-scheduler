@@ -1,56 +1,27 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "../../../../lib/supabaseClient";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string;
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export async function GET(_req: Request, ctx: { params: { id: string } }) {
+  const { id } = ctx.params || {};
+  if (!id) {
+    return NextResponse.json({ error: "Missing id" }, { status: 400 });
+  }
 
-type RideUpdate = {
-  date?: string | null;
-  ride_time?: string | null;
-  status?: string | null;
-  pickup_location_id?: string | null;
-  emergency_contact_id?: string | null;
-  pilot_id?: string | null;
-  passenger1_id?: string | null;
-  passenger2_id?: string | null;
-  pre_ride_notes?: string | null;
-};
+  const { data, error } = await supabase
+    .from("ride_events")
+    .select(
+      "id,date,meeting_time,status,pickup_location_id,emergency_contact_id,pilot_id,passenger1_id,passenger2_id,pre_ride_notes"
+    )
+    .eq("id", id)
+    .single();
 
-function toLowerStatus(s?: string | null) {
-  const v = String(s || "").toLowerCase().trim();
-  if (v === "confirmed") return "confirmed";
-  if (v === "completed") return "completed";
-  if (v === "canceled" || v === "cancelled") return "canceled";
-  if (v === "tentative") return "tentative";
-  return undefined as any;
-}
+  if (error) {
+    const notFound = String(error.message || "").toLowerCase().includes("row not found");
+    if (notFound) {
+      return NextResponse.json({ error: "Ride not found" }, { status: 404 });
+    }
+    return NextResponse.json({ error: error.message || "Database error" }, { status: 500 });
+  }
 
-export async function PATCH(req: Request, context: any) {
-  const id = String(context?.params?.id || "");
-  if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
-
-  const body = (await req.json().catch(() => ({}))) as RideUpdate;
-  const update: any = {};
-  if (body.date !== undefined) update.date = body.date;
-  if (body.ride_time !== undefined) update.meeting_time = body.ride_time;
-  if (body.pickup_location_id !== undefined) update.pickup_location_id = body.pickup_location_id;
-  if (body.emergency_contact_id !== undefined) update.emergency_contact_id = body.emergency_contact_id;
-  if (body.pilot_id !== undefined) update.pilot_id = body.pilot_id;
-  if (body.passenger1_id !== undefined) update.passenger1_id = body.passenger1_id;
-  if (body.passenger2_id !== undefined) update.passenger2_id = body.passenger2_id;
-  if (body.pre_ride_notes !== undefined) update.pre_ride_notes = body.pre_ride_notes;
-  if (body.status !== undefined) update.status = toLowerStatus(body.status);
-
-  const { error } = await supabase.from("ride_events").update(update).eq("id", id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  return NextResponse.json({ ok: true });
-}
-
-export async function DELETE(req: Request, context: any) {
-  const id = String(context?.params?.id || "");
-  if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
-  const { error } = await supabase.from("ride_events").delete().eq("id", id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ride: data }, { status: 200 });
 }

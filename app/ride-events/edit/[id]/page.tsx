@@ -4,14 +4,6 @@ import React, { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import RideForm from "../../../../components/RideForm";
 
-/**
- * NOTE:
- * Temporarily removed <RoleGate> wrapper to avoid a type error that requires
- * an `allow` prop. RLS policies still protect the data in Supabase.
- * If you want RoleGate back, re-wrap the returned JSX and pass the expected
- * `allow` prop per your RoleGate component's API (e.g., allow={["authenticated"]}).
- */
-
 type RideDetail = {
   id: string;
   date: string;
@@ -40,9 +32,19 @@ export default function EditRidePage() {
       setErr(null);
       try {
         const res = await fetch(`/api/rides/${id}`, { cache: "no-store" });
-        const j = await res.json();
-        if (!alive) return;
-        if (!res.ok) throw new Error(j?.error || "Failed to load ride");
+        const text = await res.text();
+        let j: any = {};
+        try {
+          j = text ? JSON.parse(text) : {};
+        } catch {
+          throw new Error("Invalid JSON returned from the server.");
+        }
+        if (!res.ok) {
+          throw new Error(j?.error || "Failed to load ride");
+        }
+        if (!j?.ride) {
+          throw new Error("Ride not found");
+        }
         setInitial(j.ride as RideDetail);
       } catch (e: any) {
         if (alive) setErr(e?.message || "Failed to load ride");
